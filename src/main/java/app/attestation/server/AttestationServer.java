@@ -29,10 +29,7 @@ import jakarta.mail.internet.AddressException;
 import jakarta.mail.internet.InternetAddress;
 import org.bouncycastle.crypto.generators.SCrypt;
 
-import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
-import java.io.DataInputStream;
-import java.io.EOFException;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
@@ -43,12 +40,9 @@ import java.nio.ByteBuffer;
 import java.nio.CharBuffer;
 import java.nio.charset.CharacterCodingException;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Paths;
 import java.security.cert.Certificate;
 import java.security.GeneralSecurityException;
 import java.security.MessageDigest;
-import java.security.SecureRandom;
 import java.util.Base64;
 import java.util.EnumMap;
 import java.util.List;
@@ -57,7 +51,6 @@ import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.logging.ConsoleHandler;
-import java.util.logging.Handler;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import java.util.zip.DataFormatException;
@@ -67,12 +60,11 @@ import static app.attestation.server.AttestationProtocol.fingerprintsStock;
 import static app.attestation.server.AttestationProtocol.fingerprintsStrongBoxNonStock;
 import static app.attestation.server.AttestationProtocol.fingerprintsStrongBoxStock;
 import static app.attestation.server.SyslogLevel.ALERT;
+import static app.attestation.server.SyslogLevel.CRIT;
 import static com.almworks.sqlite4java.SQLiteConstants.SQLITE_CONSTRAINT_UNIQUE;
 
 class AttestationServer {
     static final File ATTESTATION_DATABASE = new File("attestation.db");
-    static final File SAMPLES_DATABASE = new File("samples.db");
-    private static final int MAX_SAMPLE_SIZE = 128 * 1024;
 
     private static final int DEFAULT_VERIFY_INTERVAL = 6 * 60 * 60;
     private static final int MIN_VERIFY_INTERVAL = 60 * 60;
@@ -86,7 +78,7 @@ class AttestationServer {
     private static final int HISTORY_PER_PAGE = 20;
     private static final long MMAP_SIZE = 1024 * 1024 * 1024;
 
-    static final String DOMAIN = "attestation.app";
+    static final String DOMAIN = "attestation.diamaneos.de";
     private static final String ORIGIN = "https://" + DOMAIN;
 
     private static final long POST_START_DELAY_MS = 1000;
@@ -150,38 +142,6 @@ class AttestationServer {
         }
     }
 
-    private static final String CREATE_SAMPLES_TABLE = """
-            CREATE TABLE IF NOT EXISTS Samples (
-                sample BLOB NOT NULL,
-                time INTEGER NOT NULL
-            ) STRICT""";
-
-    private static void setupSamplesDatabase() throws SQLiteException {
-        final SQLiteConnection conn = open(SAMPLES_DATABASE);
-        try {
-            final SQLiteStatement selectCreated = conn.prepare(
-                    "SELECT 1 FROM sqlite_master WHERE type='table' AND name='Samples'");
-            if (!selectCreated.step()) {
-                conn.exec("PRAGMA user_version = 1");
-            }
-            selectCreated.dispose();
-
-            int userVersion = getUserVersion(conn);
-
-            conn.exec(CREATE_SAMPLES_TABLE);
-
-            if (userVersion < 1) {
-                logger.log(ALERT, SAMPLES_DATABASE + " database schemas older than version 1 are no longer " +
-                        "supported. Use an older AttestationServer revision to upgrade.");
-                System.exit(1);
-            }
-
-            logger.info("Finished database setup for " + SAMPLES_DATABASE);
-        } finally {
-            conn.dispose();
-        }
-    }
-
     private static final String CREATE_ATTESTATION_TABLES = """
             CREATE TABLE IF NOT EXISTS Configuration (
                 key TEXT PRIMARY KEY NOT NULL,
@@ -224,7 +184,7 @@ class AttestationServer {
                 pinnedVendorPatchLevel INTEGER,
                 pinnedBootPatchLevel INTEGER,
                 pinnedAppVersion INTEGER NOT NULL,
-                pinnedAppVariant INTEGER NOT NULL CHECK (pinnedAppVariant in (0, 1, 2)),
+                pinnedAppVariant INTEGER NOT NULL CHECK (pinnedAppVariant in (0, 1, 2, 3)),
                 pinnedSecurityLevel INTEGER NOT NULL,
                 userProfileSecure INTEGER NOT NULL CHECK (userProfileSecure in (0, 1)),
                 enrolledBiometrics INTEGER NOT NULL CHECK (enrolledBiometrics in (0, 1)),
@@ -861,6 +821,144 @@ class AttestationServer {
                 logger.info("Migrated to schema version: " + userVersion);
             }
 
+            // Preserve a distinct GrapheneOS release-signer pairing variant.
+            targetUserVersion = 17;
+            if (userVersion < targetUserVersion) {
+                conn.exec("PRAGMA foreign_keys = OFF");
+                conn.exec("BEGIN IMMEDIATE TRANSACTION");
+
+                conn.exec("ALTER TABLE Devices RENAME TO OldDevices");
+                conn.exec("ALTER TABLE Attestations RENAME TO OldAttestations");
+
+                conn.exec(CREATE_ATTESTATION_TABLES);
+
+                conn.exec("""
+                        INSERT INTO Devices (
+                            fingerprint,
+                            pinnedCertificates,
+                            attestKey,
+                            pinnedVerifiedBootKey,
+                            verifiedBootHash,
+                            pinnedOsVersion,
+                            pinnedOsPatchLevel,
+                            pinnedVendorPatchLevel,
+                            pinnedBootPatchLevel,
+                            pinnedAppVersion,
+                            pinnedAppVariant,
+                            pinnedSecurityLevel,
+                            userProfileSecure,
+                            enrolledBiometrics,
+                            accessibility,
+                            deviceAdmin,
+                            adbEnabled,
+                            addUsersWhenLocked,
+                            oemUnlockAllowed,
+                            systemUser,
+                            autoRebootSeconds,
+                            portSecurityMode,
+                            userCount,
+                            oemUnlockAllowed2,
+                            verifiedTimeFirst,
+                            verifiedTimeLast,
+                            expiredTimeLast,
+                            failureTimeLast,
+                            failureAlertTime,
+                            userId,
+                            deletionTime)
+                        SELECT
+                            fingerprint,
+                            pinnedCertificates,
+                            attestKey,
+                            pinnedVerifiedBootKey,
+                            verifiedBootHash,
+                            pinnedOsVersion,
+                            pinnedOsPatchLevel,
+                            pinnedVendorPatchLevel,
+                            pinnedBootPatchLevel,
+                            pinnedAppVersion,
+                            pinnedAppVariant,
+                            pinnedSecurityLevel,
+                            userProfileSecure,
+                            enrolledBiometrics,
+                            accessibility,
+                            deviceAdmin,
+                            adbEnabled,
+                            addUsersWhenLocked,
+                            oemUnlockAllowed,
+                            systemUser,
+                            autoRebootSeconds,
+                            portSecurityMode,
+                            userCount,
+                            oemUnlockAllowed2,
+                            verifiedTimeFirst,
+                            verifiedTimeLast,
+                            expiredTimeLast,
+                            failureTimeLast,
+                            failureAlertTime,
+                            userId,
+                            deletionTime
+                        FROM OldDevices""");
+
+                conn.exec("""
+                        INSERT INTO Attestations (
+                            id,
+                            fingerprint,
+                            time,
+                            strong,
+                            osVersion,
+                            osPatchLevel,
+                            vendorPatchLevel,
+                            bootPatchLevel,
+                            verifiedBootHash,
+                            appVersion,
+                            userProfileSecure,
+                            enrolledBiometrics,
+                            accessibility,
+                            deviceAdmin,
+                            adbEnabled,
+                            addUsersWhenLocked,
+                            oemUnlockAllowed,
+                            systemUser,
+                            autoRebootSeconds,
+                            portSecurityMode,
+                            userCount,
+                            oemUnlockAllowed2
+                        ) SELECT
+                            id,
+                            fingerprint,
+                            time,
+                            strong,
+                            osVersion,
+                            osPatchLevel,
+                            vendorPatchLevel,
+                            bootPatchLevel,
+                            verifiedBootHash,
+                            appVersion,
+                            userProfileSecure,
+                            enrolledBiometrics,
+                            accessibility,
+                            deviceAdmin,
+                            adbEnabled,
+                            addUsersWhenLocked,
+                            oemUnlockAllowed,
+                            systemUser,
+                            autoRebootSeconds,
+                            portSecurityMode,
+                            userCount,
+                            oemUnlockAllowed2
+                        FROM OldAttestations""");
+
+                conn.exec("DROP TABLE OldDevices");
+                conn.exec("DROP TABLE OldAttestations");
+
+                conn.exec(CREATE_ATTESTATION_INDICES);
+                conn.exec("PRAGMA user_version = " + targetUserVersion);
+                conn.exec("COMMIT TRANSACTION");
+                userVersion = targetUserVersion;
+                conn.exec("PRAGMA foreign_keys = ON");
+                logger.info("Migrated to schema version: " + userVersion);
+            }
+
             logger.info("Finished database setup for " + ATTESTATION_DATABASE);
         } finally {
             conn.dispose();
@@ -873,12 +971,14 @@ class AttestationServer {
         Logger.getLogger("com.almworks.sqlite4java").setLevel(Level.OFF);
 
         Logger.getLogger("app.attestation").setUseParentHandlers(false);
+        // Request/account diagnostics must not persist identifiers in production.
+        Logger.getLogger("app.attestation").setLevel(CRIT);
         final ConsoleHandler handler = new ConsoleHandler();
+        handler.setLevel(CRIT);
         handler.setFormatter(new JournaldFormatter());
         Logger.getLogger("app.attestation").addHandler(handler);
 
         try {
-            setupSamplesDatabase();
             setupAttestationDatabase();
         } catch (final DataFormatException | GeneralSecurityException | IOException | SQLiteException e) {
             logger.log(ALERT, "failed to setup databases", e);
@@ -908,7 +1008,6 @@ class AttestationServer {
             server.createContext("/api/attestation-history.json", new AttestationHistoryHandler());
             server.createContext("/auditor/challenge", new ChallengeHandler());
             server.createContext("/auditor/verify", new VerifyHandler());
-            server.createContext("/auditor/submit", new SubmitHandler());
             server.setExecutor(executor);
             server.start();
         } catch (final IOException e) {
@@ -2026,45 +2125,5 @@ class AttestationServer {
         }
     }
 
-    private static class SubmitHandler extends AppPostHandler {
-        @Override
-        public void handlePost(final HttpExchange exchange) throws IOException, SQLiteException {
-            final InputStream input = exchange.getRequestBody();
 
-            final ByteArrayOutputStream sample = new ByteArrayOutputStream();
-            final byte[] buffer = new byte[4096];
-            for (int read = input.read(buffer); read != -1; read = input.read(buffer)) {
-                if (sample.size() + read > MAX_SAMPLE_SIZE) {
-                    logger.warning("sample submission beyond size limit");
-                    exchange.sendResponseHeaders(413, -1);
-                    return;
-                }
-
-                sample.write(buffer, 0, read);
-            }
-
-            if (sample.size() == 0) {
-                logger.warning("empty sample submission");
-                exchange.sendResponseHeaders(400, -1);
-                return;
-            }
-
-            final SQLiteConnection conn = open(SAMPLES_DATABASE);
-            try {
-                final SQLiteStatement insert = conn.prepare(
-                        "INSERT INTO Samples (sample, time) VALUES (?, ?)");
-                try {
-                    insert.bind(1, sample.toByteArray());
-                    insert.bind(2, System.currentTimeMillis());
-                    insert.step();
-                } finally {
-                    insert.dispose();
-                }
-            } finally {
-                conn.dispose();
-            }
-
-            exchange.sendResponseHeaders(200, -1);
-        }
-    }
 }
