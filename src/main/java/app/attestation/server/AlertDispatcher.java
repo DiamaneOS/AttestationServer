@@ -21,7 +21,7 @@ import java.util.logging.Logger;
 import static app.attestation.server.SyslogLevel.CRIT;
 
 class AlertDispatcher implements Runnable {
-    private static final String EMAIL_DISPLAY_NAME = "Attestation Service";
+    private static final String EMAIL_DISPLAY_NAME = "DiamaneOS Attestation";
     private static final long WAIT_MS = 60 * 1000;
     private static final int TIMEOUT_MS = 30 * 1000;
     private static final long ALERT_THROTTLE_MS = 24 * 60 * 60 * 1000;
@@ -212,7 +212,7 @@ class AlertDispatcher implements Runnable {
                             message.setText("This is an alert for the account '" + account.username + "'.\n\n" +
                                     "The following devices have failed to provide valid attestations before the expiry time:\n\n" +
                                     expired + "\nLog in to https://" + AttestationServer.DOMAIN + "/ for more information.\n\n" +
-                                    "If you do not want to receive these alerts and cannot log in to the account,\nemail contact@" + AttestationServer.DOMAIN + " from the address receiving the alerts.");
+                                    "If you do not want to receive these alerts and cannot log in to the account,\nemail " + emailFrom + " from the address receiving the alerts.");
 
                             Transport.send(message);
 
@@ -271,7 +271,7 @@ class AlertDispatcher implements Runnable {
                             message.setText("This is an alert for the account '" + account.username + "'.\n\n" +
                                     "The following devices have provided invalid attestations:\n\n" +
                                     failed + "\nLog in to https://" + AttestationServer.DOMAIN + "/ for more information.\n\n" +
-                                    "If you do not want to receive these alerts and cannot log in to the account,\nemail contact@" + AttestationServer.DOMAIN + " from the address receiving the alerts");
+                                    "If you do not want to receive these alerts and cannot log in to the account,\nemail " + emailFrom + " from the address receiving the alerts");
 
                             Transport.send(message);
                         } catch (final MessagingException | UnsupportedEncodingException e) {
