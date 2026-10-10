@@ -1,11 +1,9 @@
 package app.attestation.server;
 
-import com.almworks.sqlite4java.SQLiteBackup;
 import com.almworks.sqlite4java.SQLiteConnection;
 import com.almworks.sqlite4java.SQLiteException;
 import com.almworks.sqlite4java.SQLiteStatement;
 
-import java.io.File;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -26,10 +24,8 @@ class Maintenance implements Runnable {
 
     @Override
     public void run() {
-        final SQLiteConnection samplesConn;
         final SQLiteConnection attestationConn;
         try {
-            samplesConn = AttestationServer.open(AttestationServer.SAMPLES_DATABASE);
             attestationConn = AttestationServer.open(AttestationServer.ATTESTATION_DATABASE);
         } catch (final SQLiteException e) {
             logger.log(CRIT, "database error, cannot set up Maintenance thread", e);
@@ -50,7 +46,6 @@ class Maintenance implements Runnable {
                         (SELECT 1 FROM Devices WHERE Accounts.userId = Devices.userId)""");
         } catch (final SQLiteException e) {
             attestationConn.dispose();
-            samplesConn.dispose();
             logger.log(CRIT, "database error, cannot set up Maintenance thread", e);
             return;
         }
@@ -65,8 +60,6 @@ class Maintenance implements Runnable {
             logger.info("maintenance started");
 
             try {
-                samplesConn.exec("VACUUM");
-
                 final long now = System.currentTimeMillis();
 
                 // This is also done as part of every login

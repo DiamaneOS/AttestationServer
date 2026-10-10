@@ -164,7 +164,9 @@ class AttestationProtocol {
     private static final String AUDITOR_APP_PACKAGE_NAME_RELEASE = "app.attestation.auditor";
     private static final String AUDITOR_APP_PACKAGE_NAME_PLAY = "app.attestation.auditor.play";
     private static final String AUDITOR_APP_PACKAGE_NAME_DEBUG = "app.attestation.auditor.debug";
-    private static final String AUDITOR_APP_SIGNATURE_DIGEST_RELEASE =
+    // An empty Auditor digest disables that signature variant.
+    private static final String AUDITOR_APP_SIGNATURE_DIGEST_RELEASE = "";
+    private static final String AUDITOR_APP_SIGNATURE_DIGEST_RELEASE_GRAPHENEOS =
             "990E04F0864B19F14F84E0E432F7A393F297AB105A22C1E1B10B442A4A62C42C";
     private static final String AUDITOR_APP_SIGNATURE_DIGEST_PLAY =
             "075335BD7B54C965222B5284D2A1FDEF1198AE45EC7B09A4934287A0E3A243C7";
@@ -173,6 +175,22 @@ class AttestationProtocol {
     private static final byte AUDITOR_APP_VARIANT_RELEASE = 0;
     private static final byte AUDITOR_APP_VARIANT_PLAY = 1;
     private static final byte AUDITOR_APP_VARIANT_DEBUG = 2;
+    private static final byte AUDITOR_APP_VARIANT_RELEASE_GRAPHENEOS = 3;
+    private static final int SHA256_DIGEST_LENGTH = 32;
+
+    static byte classifyReleaseSignature(final String signatureDigest) throws GeneralSecurityException {
+        if (signatureDigest.length() != SHA256_DIGEST_LENGTH * 2) {
+            throw new GeneralSecurityException("invalid Auditor signing digest length");
+        }
+        if (!AUDITOR_APP_SIGNATURE_DIGEST_RELEASE.isEmpty() &&
+                AUDITOR_APP_SIGNATURE_DIGEST_RELEASE.equals(signatureDigest)) {
+            return AUDITOR_APP_VARIANT_RELEASE;
+        }
+        if (AUDITOR_APP_SIGNATURE_DIGEST_RELEASE_GRAPHENEOS.equals(signatureDigest)) {
+            return AUDITOR_APP_VARIANT_RELEASE_GRAPHENEOS;
+        }
+        throw new GeneralSecurityException("invalid Auditor app signing key");
+    }
 
     private static final int AUDITOR_APP_MINIMUM_VERSION = 89;
     private static final int OS_VERSION_MINIMUM = 140000;
@@ -202,17 +220,25 @@ class AttestationProtocol {
     private static final String DEVICE_PIXEL_10_PRO_FOLD = "Google Pixel 10 Pro Fold";
     private static final String DEVICE_PIXEL_10A = "Google Pixel 10a";
 
+    private static final String DEVICE_FAIRPHONE_6 = "Fairphone 6";
+
     private static final String OS_STOCK = "Stock";
     private static final String OS_GRAPHENE = "GrapheneOS";
 
     public record DeviceInfo(String name, int attestationVersion, int keymasterVersion,
             // API for detecting this was replaced in keymaster v3 but the new one isn't used yet
             boolean rollbackResistant,
-            String osName) {
+            String osName, boolean requiresStrongBox) {
+
+        public DeviceInfo(final String name, final int attestationVersion,
+                final int keymasterVersion, final boolean rollbackResistant, final String osName) {
+            this(name, attestationVersion, keymasterVersion, rollbackResistant, osName, true);
+        }
 
         boolean hasPogoPins() {
             return DEVICE_PIXEL_TABLET.equals(name);
         }
+
     }
 
     static final ImmutableMap<String, DeviceInfo> fingerprintsNonStock = ImmutableMap
@@ -260,6 +286,7 @@ class AttestationProtocol {
                     new DeviceInfo(DEVICE_PIXEL_10_PRO_FOLD, 300, 300, false, OS_GRAPHENE))
             .put("D8F879D10419EDDC9FCDA6280718BE763F6BF12299E1F72DF3EA8AD8A8EB7F80",
                     new DeviceInfo(DEVICE_PIXEL_10A, 300, 300, false, OS_GRAPHENE))
+            // Non-stock devices require an explicit verified-boot key entry.
             .build();
     static final ImmutableMap<String, DeviceInfo> fingerprintsStock = ImmutableMap
             .<String, DeviceInfo>builder()
@@ -305,6 +332,9 @@ class AttestationProtocol {
                     new DeviceInfo(DEVICE_PIXEL_10_PRO_FOLD, 300, 300, false, OS_STOCK))
             .put("E354CD6BBB15D64B2E95B2F79E9DF6CE22B8A5D0D66CFB70330D6A1BCD7212A0",
                     new DeviceInfo(DEVICE_PIXEL_10A, 300, 300, false, OS_STOCK))
+            // FP6 stock verified-boot key, matching Auditor.
+            .put("C8677EB0A60727BCCB4AB2BB9B7B156A94A7B729E4720FA21194122E39248177",
+                    new DeviceInfo(DEVICE_FAIRPHONE_6, 300, 300, false, OS_STOCK, false))
             .build();
 
     static final ImmutableMap<String, DeviceInfo> fingerprintsStrongBoxNonStock = ImmutableMap
@@ -474,10 +504,6 @@ class AttestationProtocol {
         if (attestation.keymasterSecurityLevel != attestationSecurityLevelEnum) {
             throw new GeneralSecurityException("keymaster security level does not match attestation security level");
         }
-        // enforce StrongBox for new pairings
-        if (!hasPersistentKey && attestationSecurityLevelEnum != ParsedAttestationRecord.SecurityLevel.STRONG_BOX) {
-            throw new GeneralSecurityException("new pairing without StrongBox security level");
-        }
 
         // prevent replay attacks
         final byte[] challenge = attestation.attestationChallenge;
@@ -500,14 +526,14 @@ class AttestationProtocol {
         } else if (signatureDigests.size() != 1) {
             throw new GeneralSecurityException("invalid number of Auditor app signing keys: " + signatureDigests.size());
         }
+        if (signatureDigests.get(0).length != SHA256_DIGEST_LENGTH) {
+            throw new GeneralSecurityException("invalid Auditor signing digest length");
+        }
         final String signatureDigest = BaseEncoding.base16().encode(signatureDigests.get(0));
         final byte appVariant;
         final String packageName = info.packageName;
         if (AUDITOR_APP_PACKAGE_NAME_RELEASE.equals(packageName)) {
-            if (!AUDITOR_APP_SIGNATURE_DIGEST_RELEASE.equals(signatureDigest)) {
-                throw new GeneralSecurityException("invalid Auditor app signing key");
-            }
-            appVariant = AUDITOR_APP_VARIANT_RELEASE;
+            appVariant = classifyReleaseSignature(signatureDigest);
         } else if (AUDITOR_APP_PACKAGE_NAME_PLAY.equals(packageName)) {
             if (!AUDITOR_APP_SIGNATURE_DIGEST_PLAY.equals(signatureDigest)) {
                 throw new GeneralSecurityException("invalid Auditor app signing key");
@@ -560,6 +586,13 @@ class AttestationProtocol {
 
         if (device == null) {
             throw new GeneralSecurityException("invalid verified boot key fingerprint: " + verifiedBootKey);
+        }
+
+        // Keep the upstream rule for every other device. FP6 is exempt only
+        // through its authenticated, allowlisted verified-boot key above.
+        if (!hasPersistentKey && device.requiresStrongBox() &&
+                attestationSecurityLevelEnum != ParsedAttestationRecord.SecurityLevel.STRONG_BOX) {
+            throw new GeneralSecurityException("new pairing without StrongBox security level");
         }
 
         // OS version sanity checks

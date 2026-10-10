@@ -44,11 +44,30 @@ tasks.withType<JavaCompile> {
     options.compilerArgs.addAll(listOf("-Xlint", "-Xlint:-serial"))
 }
 
-val copyJavaDeps by tasks.registering(Copy::class) {
+val copyJavaDeps = tasks.register<Copy>("copyJavaDeps") {
     from(configurations.runtimeClasspath)
     into("build/libs")
 }
 
 tasks.build {
     dependsOn(copyJavaDeps)
+}
+
+val policyTests = sourceSets.create("policyTest")
+policyTests.compileClasspath += sourceSets.main.get().output
+policyTests.runtimeClasspath += sourceSets.main.get().output
+configurations[policyTests.implementationConfigurationName].extendsFrom(configurations.implementation.get())
+configurations[policyTests.runtimeOnlyConfigurationName].extendsFrom(configurations.runtimeOnly.get())
+
+val diamaneOSPolicyTest = tasks.register<JavaExec>("diamaneOSPolicyTest") {
+    dependsOn(tasks.named(policyTests.classesTaskName))
+    classpath = policyTests.runtimeClasspath
+    mainClass.set("app.attestation.server.DiamaneOSPolicyTest")
+    javaLauncher.set(javaToolchains.launcherFor {
+        languageVersion.set(JavaLanguageVersion.of(25))
+    })
+}
+
+tasks.check {
+    dependsOn(diamaneOSPolicyTest)
 }
