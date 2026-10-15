@@ -15,59 +15,50 @@
   <header><a href="https://diamaneos.de/" rel="noreferrer">DiamaneOS</a> · <a href="https://diamaneos.de/legal/#impressum" rel="noreferrer">Impressum</a></header>
   <main id="main" tabindex="-1">
     <h1>Attestation privacy policy</h1>
-    <p>When you use remote verification, this service checks enrolled devices' integrity and sends selected alerts. This policy covers connection data, accounts, device security information and related retention. Reading this page does not register an account or enroll a device.</p>
+    <p>This service verifies the integrity of enrolled devices for remote verification and sends selected alerts. This policy covers its connection data, accounts, device security information and their retention. Reading this page does not create an account or enroll a device.</p>
 
     <h2>Controller and contact</h2>
     <address>Abhinav Jhanwar<br>c/o RA Matutis<br>Berliner Straße 57<br>14467 Potsdam</address>
     <p>Email: <a href="mailto:hello@diamaneos.de">hello@diamaneos.de</a>. You can also use the <a href="https://diamaneos.de/about/#contact" rel="noreferrer">contact form</a>.</p>
 
     <h2>Purposes and legal bases</h2>
-    <p>Connection data is processed to deliver responses and limit abuse. Account and device information supports requested integrity verification, account security and selected alerts. Article 6(1)(f) GDPR applies: legitimate interests in reliable, secure verification with data limited to these functions.</p>
-    <p>Remote verification is optional. The account and security information below is necessary to use it. Verification results describe device integrity; this service does not make decisions about people with legal or similarly significant effects.</p>
+    <p>Connection data is processed to deliver responses and limit abuse. Account and device information is processed for the integrity verification you request, for account security and for the alerts you choose. The legal basis is Article 6(1)(f) GDPR: the legitimate interest in reliable, secure verification, with data limited to these functions.</p>
+    <p>Remote verification is optional. The account and security information below is needed to use it. Verification results describe a device's integrity. The service makes no decisions about people with legal or similarly significant effects.</p>
 
     <h2>Information processed</h2>
     <ul>
-      <li>Connections expose an IP address, request time, path and protocol headers. Request access logs and request-associated error logs are disabled. Temporary connection and request limits use memory.</li>
-      <li>Accounts store a username, salted password hash, enrollment credential, creation and login times, verification settings, optional alert email addresses and authentication sessions. Passwords are verified transiently; the database stores their hash, not their plaintext.</li>
-      <li>Devices store a pairing-key fingerprint, attestation certificates, verified-boot identity, software versions and patch levels, verification times and supplementary security-state flags.</li>
-      <li>Security-state flags include lock security, biometric enrollment, accessibility, device administration, debugging and other device protections. Biometric enrollment is a status flag; biometric samples and templates are not submitted.</li>
-      <li>Verification history records timestamps, verification strength, software and patch versions, verified-boot information and the submitted security-state flags. The pairing fingerprint identifies the verification key; it is not a biometric fingerprint.</li>
+      <li><strong>Connections:</strong> your IP address, the request time, the path and protocol headers. Request access logs and request-related error logs are disabled. Connection and request limits keep their state in memory only.</li>
+      <li><strong>Accounts:</strong> a username, a salted password hash, an enrollment credential, creation and login times, verification settings, optional alert email addresses and login sessions. Passwords are checked when you log in. The database stores only their hash.</li>
+      <li><strong>Devices:</strong> a pairing-key fingerprint, attestation certificates, the verified boot identity, software versions and patch levels, verification times and security-state flags. The pairing fingerprint identifies a verification key. It is not a biometric fingerprint.</li>
+      <li><strong>Security-state flags:</strong> screen lock, biometric enrollment, accessibility, device administration, debugging and other device protections. Biometric enrollment is a yes or no flag. No biometric samples or templates are sent.</li>
+      <li><strong>Verification history:</strong> timestamps, verification strength, software and patch versions, verified boot information and the submitted security-state flags.</li>
     </ul>
-    <p>The service does not use this information for advertising or cross-service user profiling. There is no sample-upload endpoint in this server. Local Auditor verification between devices does not send its results here.</p>
+    <p>This information is not used for advertising or for profiling across services. The server has no endpoint for uploading samples. Local Auditor verification between two devices sends nothing here.</p>
 
     <h2>Cookies</h2>
-    <p>The account interface uses a necessary authentication cookie, restricted to this host, with Secure, HttpOnly and SameSite=Strict protections. Server-side sessions expire after 48 hours and can be ended by logout. The cookie is strictly necessary for the account you sign in to, so no consent is asked (Section 25(2) No. 2 TDDDG). The privacy page sets no cookie and runs no script.</p>
+    <p>The account interface uses one authentication cookie. It is limited to this host and set with Secure, HttpOnly and SameSite=Strict. Sessions expire after 48 hours, or earlier when you log out. The cookie is strictly necessary for the account you sign in to, so no consent is asked (Section 25(2) No. 2 TDDDG). This page sets no cookie and runs no script.</p>
 
     <h2>Retention</h2>
-    <p>The database maintenance job removes expired sessions and applies the following rules. It runs after startup and then daily; removal takes place on the next successful maintenance run after the threshold.</p>
+    <p>A maintenance job runs five minutes after the service starts and then daily. It removes expired sessions and deletes records under these rules, on its next run after each threshold:</p>
     <ul>
-      <li>Devices marked for deletion: after seven days, including their associated verification history.</li>
-      <li>Inactive devices: after 90 days without a successful verification.</li>
+      <li>Devices you delete: after seven days, with their verification history.</li>
+      <li>Inactive devices: after 90 days without a successful verification, with their verification history.</li>
       <li>Verification-history entries: after 180 days.</li>
-      <li>Accounts with no remaining device records: after 365 days without a login.</li>
+      <li>Accounts with no remaining devices: after 365 days without a login.</li>
     </ul>
-    <p>Deletion removes records from the live database. Requests to access or erase account data use the contact details above; account deletion is handled through that request process, rather than a self-service account-delete button.</p>
-    <p>Operational journals use volatile storage with a one-day retention limit and are cleared on reboot. Application logging is restricted to critical failures.</p>
-
-    <h2>Encrypted backups</h2>
-    <p>Database backups are encrypted before transfer to Backblaze B2 in the Netherlands. They support recovery after data loss. Deletion from the live database does not immediately remove records from an encrypted backup.</p>
-    <p>Cloud lifecycle rules hide copies 30 days after upload and request deletion 30 days after hiding. Provider processing, retention locks or legal holds can delay deletion. These periods are not a guarantee of deletion on an exact day.</p>
-    <p>Local encrypted copies are limited by space and count. Copies without verified upload, the newest copies and verified recovery anchors are retained until replacement or safe deletion. Backups are used for recovery, rather than ordinary account or device queries.</p>
+    <p>Deletion removes records from the database. To see or erase your account data, use the contact details above. There is no button to delete an account yourself.</p>
+    <p>Operational logs are kept in memory for at most one day and cleared on reboot. The service logs only critical failures.</p>
 
     <h2>Hosting and email</h2>
-    <p>The service is hosted by <a href="https://www.ovhcloud.com/de/terms-and-conditions/privacy-policy/" rel="noreferrer">OVHcloud</a> in France. Account and device records use encrypted server storage. Encryption does not prevent the running service from processing them. Hosting and network providers can observe connections and maintain their own security or business records.</p>
-    <p><a href="https://www.backblaze.com/company/policy/privacy" rel="noreferrer">Backblaze, Inc.</a> is a US provider. Its <a href="https://www.backblaze.com/company/policy/dpa-for-eea-eu-residents" rel="noreferrer">EEA data-processing terms</a> describe international-transfer safeguards, including standard contractual clauses. Backup content is encrypted, but the provider can process storage-account details, object sizes, timestamps and upload connections.</p>
-    <p>Contact us for information and copies of safeguards applying to transfers of your data.</p>
-    <p>Selected alerts are delivered through mailbox.org in Germany to the address configured for the account. They can contain account and device identifiers and verification warnings. Sending and receiving mail providers process the message and delivery metadata.</p>
-    <p>Contact messages, sent to hello@diamaneos.de or through the contact form, are received and stored by <a href="https://mailbox.org/en/data-protection/" rel="noreferrer">mailbox.org</a> in Germany. An alert destination's own provider can involve other countries.</p>
-    <p>Contact correspondence is kept while the enquiry and necessary follow-up are active. Resolved conversations are reviewed quarterly and deleted from active mailboxes within six months of resolution. A specific legal obligation or legal claim can require longer retention.</p>
-    <p>mailbox.org states that its daily email backups are kept for up to seven days. Postal correspondence at the c/o address is handled through RA Matutis, Germany.</p>
+    <p>The service is hosted by <a href="https://www.ovhcloud.com/de/terms-and-conditions/privacy-policy/" rel="noreferrer">OVHcloud</a> in France. Account and device records are kept on encrypted server storage. Encryption does not stop the running service from processing them. Hosting and network providers can observe connections and keep their own security or business records.</p>
+    <p>Alerts are sent through <a href="https://mailbox.org/en/data-protection/" rel="noreferrer">mailbox.org</a> in Germany to the addresses set for the account. They can contain account and device identifiers and verification warnings. The sending and receiving mail providers process the message and its delivery metadata. The provider of an alert address you choose can be in another country.</p>
+    <p>Mail to hello@diamaneos.de and contact form messages are received and stored by mailbox.org in Germany. Correspondence is kept while the enquiry and its follow-up are active. Resolved conversations are reviewed quarterly and deleted from active mailboxes within six months of resolution. A legal obligation or a legal claim can require longer retention. mailbox.org states that it keeps daily mail backups for up to seven days. Postal correspondence at the c/o address is handled by RA Matutis in Germany.</p>
 
     <h2>Your rights</h2>
-    <p>You can request access, correction, erasure or restriction. Portability applies where its legal conditions are met. Necessary identity checks are proportionate to the data requested.</p>
+    <p>You can ask for access to your data and for its correction, erasure or restriction. Portability applies where its legal conditions are met. Identity checks are limited to what the request needs.</p>
     <p><strong>Right to object.</strong> Where processing relies on legitimate interests (Article 6(1)(f) GDPR), you can object to it at any time for reasons arising from your particular situation (Article 21 GDPR). Send the objection to the contact details above.</p>
-    <p>Requests receive a response within one month. Where complexity or the number of requests requires an extension, up to two additional months are allowed; you will be informed of the reason within the first month.</p>
-    <p>You can complain to a data-protection supervisory authority, including one where you live or work. Contact details above also apply to privacy enquiries. See the <a href="https://diamaneos.de/legal/#privacy" rel="noreferrer">website privacy policy</a> for the contact form and other DiamaneOS services.</p>
+    <p>Requests are answered within one month. Where complexity or the number of requests needs it, this can be extended by up to two months. You are told the reason within the first month.</p>
+    <p>You can complain to a data-protection supervisory authority, for example where you live or work. The <a href="https://diamaneos.de/legal/#privacy" rel="noreferrer">website privacy policy</a> covers the contact form and the other DiamaneOS services.</p>
   </main>
 </body>
 </html>
