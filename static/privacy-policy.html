@@ -1,74 +1,73 @@
-<!DOCTYPE html>
-<html lang="en" prefix="og: https://ogp.me/ns#">
-    <head>
-        <meta charset="utf-8"/>
-        <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
-        <title>Privacy policy | attestation.app</title>
-        {{css|/main.css}}
-        <meta name="description" content="Privacy policy for the Auditor Android app and associated service."/>
-        <meta name="theme-color" content="#212121"/>
-        <meta name="color-scheme" content="dark light"/>
-        <meta name="twitter:site" content="@GrapheneOS"/>
-        <meta name="twitter:creator" content="@GrapheneOS"/>
-        <meta property="og:title" content="Auditor privacy policy"/>
-        <meta property="og:description" content="Privacy policy for the Auditor Android app and associated service."/>
-        <meta property="og:type" content="website"/>
-        <meta property="og:image" content="https://attestation.app/opengraph.png"/>
-        <meta property="og:image:width" content="512"/>
-        <meta property="og:image:height" content="512"/>
-        <meta property="og:image:alt" content="Auditor logo"/>
-        <meta property="og:url" content="https://attestation.app/privacy-policy"/>
-        <meta property="og:site_name" content="attestation.app"/>
-        <link rel="canonical" href="https://attestation.app/privacy-policy"/>
-        <link rel="icon" href="/favicon.ico"/>
-        <link rel="icon" sizes="any" type="image/svg+xml" href="/favicon.svg"/>
-        <link rel="mask-icon" href="/mask-icon.svg" color="#000000"/>
-        <link rel="apple-touch-icon" href="/apple-touch-icon.png"/>
-        <link rel="manifest" href="/manifest.webmanifest"/>
-        <link rel="license" href="/LICENSE.txt"/>
-    </head>
-    <body>
-        <header>
-            <nav id="site-menu">
-                <ul>
-                    <li><a href="/">Device integrity monitoring</a></li>
-                    <li><a href="/about">About</a></li>
-                    <li><a href="/tutorial">Tutorial</a></li>
-                    <li><a href="/source">Source</a></li>
-                    <li aria-current="page"><a href="/privacy-policy">Privacy policy</a></li>
-                    <li><a href="/donate">Donate</a></li>
-                    <li><a href="/contact">Contact</a></li>
-                </ul>
-            </nav>
-        </header>
-        <main id="privacy-policy">
-            <h1><a href="#privacy-policy">Privacy policy</a></h1>
-            <p>The 'Submit sample data' and 'Enable remote verification' features make HTTPS
-            connections to the https://attestation.app/ server which will be logged by the web
-            server.</p>
-            <p>The 'Submit sample data' feature will submit a sample attestation and a survey of
-            system properties accessible to every app without permissions.</p>
-            <p>The 'Enable remote verification' feature will prompt to scan a QR code from an account
-            on https://attestation.app/ and will use that to subscribe to submitting attestations to
-            that account on https://attestation.app/ at the configured rate.</p>
-            <p>Attestations contain a certificate chain provided by the hardware-based Trusted
-            Execution Environment and/or Secure Element on the device including assorted
-            verifiable system information. The app also collects other supplementary security
-            information which is displayed in the app and service for successful
-            verifications.</p>
-            <p>A persistent hardware-backed key is generated for each Auditor-Auditee pairing either
-            between two instances of the app or between the app and https://attestation.app/. The
-            ability to use the persistent key to sign verifiably fresh attestations is used as part of
-            performing verification of the integrity and identity of the device. The keys are wiped
-            when the app is uninstalled or app data is cleared via the OS.</p>
-            <p>The camera permission is used to scan QR codes from the Auditor app on another device
-            or the https://attestation.app/ service. Images captured by the camera are not stored,
-            exported in any way or used for anything else other than decoding QR codes.</p>
-            <p>The app and service are both open source and can be audited.</p>
-            <p>This privacy policy will be updated to explain how permissions and data are used as the
-            Auditor app and https://attestation.app/ service are developed. It will always retain the
-            property of requiring user consent to make network connections or otherwise export any
-            data.</p>
-        </main>
-    </body>
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Privacy information for DiamaneOS attestation and device-integrity verification.">
+  <meta name="referrer" content="no-referrer">
+  <meta name="color-scheme" content="light dark">
+  <link rel="canonical" href="https://attestation.diamaneos.de/privacy-policy">
+  <link rel="stylesheet" href="/privacy.css">
+  <title>Privacy policy · DiamaneOS attestation</title>
+</head>
+<body>
+  <a class="skip" href="#main">Skip to content</a>
+  <header><a href="https://diamaneos.de/" rel="noreferrer">DiamaneOS</a> · <a href="https://diamaneos.de/legal/#impressum" rel="noreferrer">Impressum</a></header>
+  <main id="main" tabindex="-1">
+    <h1>Attestation privacy policy</h1>
+    <p>When you use remote verification, this service checks enrolled devices' integrity and sends selected alerts. This policy covers connection data, accounts, device security information and related retention. Reading this page does not register an account or enroll a device.</p>
+
+    <h2>Controller and contact</h2>
+    <address>Abhinav Jhanwar<br>c/o RA Matutis<br>Berliner Straße 57<br>14467 Potsdam</address>
+    <p>Email: <a href="mailto:hello@diamaneos.de">hello@diamaneos.de</a>. You can also use the <a href="https://diamaneos.de/about/#contact" rel="noreferrer">contact form</a>.</p>
+
+    <h2>Purposes and legal bases</h2>
+    <p>Connection data is processed to deliver responses and limit abuse. Account and device information supports requested integrity verification, account security and selected alerts. Article 6(1)(f) GDPR applies: legitimate interests in reliable, secure verification with data limited to these functions.</p>
+    <p>Remote verification is optional. The account and security information below is necessary to use it. Verification results describe device integrity; this service does not make decisions about people with legal or similarly significant effects.</p>
+
+    <h2>Information processed</h2>
+    <ul>
+      <li>Connections expose an IP address, request time, path and protocol headers. Request access logs and request-associated error logs are disabled. Temporary connection and request limits use memory.</li>
+      <li>Accounts store a username, salted password hash, enrollment credential, creation and login times, verification settings, optional alert email addresses and authentication sessions. Passwords are verified transiently; the database stores their hash, not their plaintext.</li>
+      <li>Devices store a pairing-key fingerprint, attestation certificates, verified-boot identity, software versions and patch levels, verification times and supplementary security-state flags.</li>
+      <li>Security-state flags include lock security, biometric enrollment, accessibility, device administration, debugging and other device protections. Biometric enrollment is a status flag; biometric samples and templates are not submitted.</li>
+      <li>Verification history records timestamps, verification strength, software and patch versions, verified-boot information and the submitted security-state flags. The pairing fingerprint identifies the verification key; it is not a biometric fingerprint.</li>
+    </ul>
+    <p>The service does not use this information for advertising or cross-service user profiling. There is no sample-upload endpoint in this server. Local Auditor verification between devices does not send its results here.</p>
+
+    <h2>Cookies</h2>
+    <p>The account interface uses a necessary authentication cookie, restricted to this host, with Secure, HttpOnly and SameSite=Strict protections. Server-side sessions expire after 48 hours and can be ended by logout. The cookie is strictly necessary for the account you sign in to, so no consent is asked (Section 25(2) No. 2 TDDDG). The privacy page sets no cookie and runs no script.</p>
+
+    <h2>Retention</h2>
+    <p>The database maintenance job removes expired sessions and applies the following rules. It runs after startup and then daily; removal takes place on the next successful maintenance run after the threshold.</p>
+    <ul>
+      <li>Devices marked for deletion: after seven days, including their associated verification history.</li>
+      <li>Inactive devices: after 90 days without a successful verification.</li>
+      <li>Verification-history entries: after 180 days.</li>
+      <li>Accounts with no remaining device records: after 365 days without a login.</li>
+    </ul>
+    <p>Deletion removes records from the live database. Requests to access or erase account data use the contact details above; account deletion is handled through that request process, rather than a self-service account-delete button.</p>
+    <p>Operational journals use volatile storage with a one-day retention limit and are cleared on reboot. Application logging is restricted to critical failures.</p>
+
+    <h2>Encrypted backups</h2>
+    <p>Database backups are encrypted before transfer to Backblaze B2 in the Netherlands. They support recovery after data loss. Deletion from the live database does not immediately remove records from an encrypted backup.</p>
+    <p>Cloud lifecycle rules hide copies 30 days after upload and request deletion 30 days after hiding. Provider processing, retention locks or legal holds can delay deletion. These periods are not a guarantee of deletion on an exact day.</p>
+    <p>Local encrypted copies are limited by space and count. Copies without verified upload, the newest copies and verified recovery anchors are retained until replacement or safe deletion. Backups are used for recovery, rather than ordinary account or device queries.</p>
+
+    <h2>Hosting and email</h2>
+    <p>The service is hosted by <a href="https://www.ovhcloud.com/de/terms-and-conditions/privacy-policy/" rel="noreferrer">OVHcloud</a> in France. Account and device records use encrypted server storage. Encryption does not prevent the running service from processing them. Hosting and network providers can observe connections and maintain their own security or business records.</p>
+    <p><a href="https://www.backblaze.com/company/policy/privacy" rel="noreferrer">Backblaze, Inc.</a> is a US provider. Its <a href="https://www.backblaze.com/company/policy/dpa-for-eea-eu-residents" rel="noreferrer">EEA data-processing terms</a> describe international-transfer safeguards, including standard contractual clauses. Backup content is encrypted, but the provider can process storage-account details, object sizes, timestamps and upload connections.</p>
+    <p>Contact us for information and copies of safeguards applying to transfers of your data.</p>
+    <p>Selected alerts are delivered through mailbox.org in Germany to the address configured for the account. They can contain account and device identifiers and verification warnings. Sending and receiving mail providers process the message and delivery metadata.</p>
+    <p>Contact messages, sent to hello@diamaneos.de or through the contact form, are received and stored by <a href="https://mailbox.org/en/data-protection/" rel="noreferrer">mailbox.org</a> in Germany. An alert destination's own provider can involve other countries.</p>
+    <p>Contact correspondence is kept while the enquiry and necessary follow-up are active. Resolved conversations are reviewed quarterly and deleted from active mailboxes within six months of resolution. A specific legal obligation or legal claim can require longer retention.</p>
+    <p>mailbox.org states that its daily email backups are kept for up to seven days. Postal correspondence at the c/o address is handled through RA Matutis, Germany.</p>
+
+    <h2>Your rights</h2>
+    <p>You can request access, correction, erasure or restriction. Portability applies where its legal conditions are met. Necessary identity checks are proportionate to the data requested.</p>
+    <p><strong>Right to object.</strong> Where processing relies on legitimate interests (Article 6(1)(f) GDPR), you can object to it at any time for reasons arising from your particular situation (Article 21 GDPR). Send the objection to the contact details above.</p>
+    <p>Requests receive a response within one month. Where complexity or the number of requests requires an extension, up to two additional months are allowed; you will be informed of the reason within the first month.</p>
+    <p>You can complain to a data-protection supervisory authority, including one where you live or work. Contact details above also apply to privacy enquiries. See the <a href="https://diamaneos.de/legal/#privacy" rel="noreferrer">website privacy policy</a> for the contact form and other DiamaneOS services.</p>
+  </main>
+</body>
 </html>
