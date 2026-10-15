@@ -220,25 +220,17 @@ class AttestationProtocol {
     private static final String DEVICE_PIXEL_10_PRO_FOLD = "Google Pixel 10 Pro Fold";
     private static final String DEVICE_PIXEL_10A = "Google Pixel 10a";
 
-    private static final String DEVICE_FAIRPHONE_6 = "Fairphone 6";
-
     private static final String OS_STOCK = "Stock";
     private static final String OS_GRAPHENE = "GrapheneOS";
 
     public record DeviceInfo(String name, int attestationVersion, int keymasterVersion,
             // API for detecting this was replaced in keymaster v3 but the new one isn't used yet
             boolean rollbackResistant,
-            String osName, boolean requiresStrongBox) {
-
-        public DeviceInfo(final String name, final int attestationVersion,
-                final int keymasterVersion, final boolean rollbackResistant, final String osName) {
-            this(name, attestationVersion, keymasterVersion, rollbackResistant, osName, true);
-        }
+            String osName) {
 
         boolean hasPogoPins() {
             return DEVICE_PIXEL_TABLET.equals(name);
         }
-
     }
 
     static final ImmutableMap<String, DeviceInfo> fingerprintsNonStock = ImmutableMap
@@ -332,9 +324,6 @@ class AttestationProtocol {
                     new DeviceInfo(DEVICE_PIXEL_10_PRO_FOLD, 300, 300, false, OS_STOCK))
             .put("E354CD6BBB15D64B2E95B2F79E9DF6CE22B8A5D0D66CFB70330D6A1BCD7212A0",
                     new DeviceInfo(DEVICE_PIXEL_10A, 300, 300, false, OS_STOCK))
-            // FP6 stock verified-boot key, matching Auditor.
-            .put("C8677EB0A60727BCCB4AB2BB9B7B156A94A7B729E4720FA21194122E39248177",
-                    new DeviceInfo(DEVICE_FAIRPHONE_6, 300, 300, false, OS_STOCK, false))
             .build();
 
     static final ImmutableMap<String, DeviceInfo> fingerprintsStrongBoxNonStock = ImmutableMap
@@ -504,6 +493,10 @@ class AttestationProtocol {
         if (attestation.keymasterSecurityLevel != attestationSecurityLevelEnum) {
             throw new GeneralSecurityException("keymaster security level does not match attestation security level");
         }
+        // enforce StrongBox for new pairings
+        if (!hasPersistentKey && attestationSecurityLevelEnum != ParsedAttestationRecord.SecurityLevel.STRONG_BOX) {
+            throw new GeneralSecurityException("new pairing without StrongBox security level");
+        }
 
         // prevent replay attacks
         final byte[] challenge = attestation.attestationChallenge;
@@ -586,13 +579,6 @@ class AttestationProtocol {
 
         if (device == null) {
             throw new GeneralSecurityException("invalid verified boot key fingerprint: " + verifiedBootKey);
-        }
-
-        // Keep the upstream rule for every other device. FP6 is exempt only
-        // through its authenticated, allowlisted verified-boot key above.
-        if (!hasPersistentKey && device.requiresStrongBox() &&
-                attestationSecurityLevelEnum != ParsedAttestationRecord.SecurityLevel.STRONG_BOX) {
-            throw new GeneralSecurityException("new pairing without StrongBox security level");
         }
 
         // OS version sanity checks
