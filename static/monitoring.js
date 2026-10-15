@@ -59,6 +59,8 @@ function toYesNoString(value) {
 
 function toAppVariantString(appVariant) {
     if (appVariant == 0) {
+        return "Release build signed by DiamaneOS";
+    } else if (appVariant == 3) {
         return "Release build signed by GrapheneOS";
     } else if (appVariant == 1) {
         return "Release build signed by Play Store";
