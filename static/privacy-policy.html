@@ -50,9 +50,8 @@
     <p>Operational journals use volatile storage with a one-day retention limit and are cleared on reboot. Application logging is restricted to critical failures.</p>
 
     <h2>Encrypted backups</h2>
-    <p>Database backups are encrypted before transfer to Backblaze B2 in the Netherlands. They support recovery after data loss. Deletion from the live database does not immediately remove records from an encrypted backup.</p>
-    <p>Cloud lifecycle rules hide copies 30 days after upload and request deletion 30 days after hiding. Provider processing, retention locks or legal holds can delay deletion. These periods are not a guarantee of deletion on an exact day.</p>
-    <p>Local encrypted copies are limited by space and count. Copies without verified upload, the newest copies and verified recovery anchors are retained until replacement or safe deletion. Backups are used for recovery, rather than ordinary account or device queries.</p>
+    <p>Encrypted copies of the database are kept in Backblaze B2 in the Netherlands (EU Central) and on an offline encrypted disk. A new copy is made when the service's configuration changes. Only a key kept offline can decrypt them. They are used to recover after data loss, not for ordinary account or device queries.</p>
+    <p>In Backblaze B2 the newest copy is kept. An older copy is deleted 60 days after a newer one replaces it. The offline disk keeps the newest copy and the newest copy of each month for one year. Deleting a record from the live database does not remove it from existing backups. Provider processing can delay deletion by a few days.</p>
 
     <h2>Hosting and email</h2>
     <p>The service is hosted by <a href="https://www.ovhcloud.com/de/terms-and-conditions/privacy-policy/" rel="noreferrer">OVHcloud</a> in France. Account and device records use encrypted server storage. Encryption does not prevent the running service from processing them. Hosting and network providers can observe connections and maintain their own security or business records.</p>
