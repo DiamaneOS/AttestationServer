@@ -1,6 +1,6 @@
 # DiamaneOS attestation server
 
-GrapheneOS-derived hardware-attestation verification and account APIs. The HTTP backend listens on loopback behind nginx; sample submission is disabled.
+GrapheneOS-derived hardware-attestation verification and account APIs. The HTTP backend listens on loopback behind nginx. Sample submission is disabled.
 
 ## Build and check
 
@@ -27,6 +27,6 @@ The pairing QR code contains `<domain> <userId> <subscribeKey> <verifyInterval>`
 
 - `POST /auditor/challenge` returns a single-use challenge.
 - `POST /auditor/verify` verifies the attestation and returns its verification interval.
-- Unpaired verification uses `Authorization: Auditor <userId> <subscribeKey>`; paired verification uses `Authorization: Auditor <userId>`.
+- Unpaired verification uses `Authorization: Auditor <userId> <subscribeKey>`. Paired verification uses `Authorization: Auditor <userId>`.
 
 Trust requirements and source provenance are described in [DOWNSTREAM.md](DOWNSTREAM.md).
