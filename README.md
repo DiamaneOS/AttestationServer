@@ -31,5 +31,6 @@ The pairing QR code contains `<domain> <userId> <subscribeKey> <verifyInterval>`
 - `POST /auditor/verify` verifies the attestation and returns its verification interval.
 - Unpaired verification uses `Authorization: Auditor <userId> <subscribeKey>`. Paired verification uses `Authorization: Auditor <userId>`.
 - `GET /releases.json` returns the signed release list this server accepted.
+- The account page offers the QR data as an `intent://` link restricted to `de.diamaneos.auditor`.
 
 Trust requirements and source provenance are described in [DOWNSTREAM.md](DOWNSTREAM.md).
