@@ -161,11 +161,11 @@ class AttestationProtocol {
             OS_ENFORCED_FLAGS_OEM_UNLOCK_ALLOWED |
             OS_ENFORCED_FLAGS_SYSTEM_USER;
 
-    private static final String AUDITOR_APP_PACKAGE_NAME_RELEASE = "app.attestation.auditor";
+    // DiamaneOS release builds use their own package and signer, GrapheneOS's keep theirs.
+    private static final String AUDITOR_APP_PACKAGE_NAME_RELEASE = "de.diamaneos.auditor";
+    private static final String AUDITOR_APP_PACKAGE_NAME_RELEASE_GRAPHENEOS = "app.attestation.auditor";
     private static final String AUDITOR_APP_PACKAGE_NAME_PLAY = "app.attestation.auditor.play";
-    private static final String AUDITOR_APP_PACKAGE_NAME_DEBUG = "app.attestation.auditor.debug";
-    // An empty Auditor digest disables that signature variant.
-    private static final String AUDITOR_APP_SIGNATURE_DIGEST_RELEASE = "";
+    private static final String AUDITOR_APP_PACKAGE_NAME_DEBUG = "de.diamaneos.auditor.debug";
     private static final String AUDITOR_APP_SIGNATURE_DIGEST_RELEASE_GRAPHENEOS =
             "990E04F0864B19F14F84E0E432F7A393F297AB105A22C1E1B10B442A4A62C42C";
     private static final String AUDITOR_APP_SIGNATURE_DIGEST_PLAY =
@@ -178,19 +178,29 @@ class AttestationProtocol {
     private static final byte AUDITOR_APP_VARIANT_RELEASE_GRAPHENEOS = 3;
     private static final int SHA256_DIGEST_LENGTH = 32;
 
-    static byte classifyReleaseSignature(final String signatureDigest) throws GeneralSecurityException {
+    // Returns the release variant, or -1 if the package is not a release package.
+    static byte classifyRelease(final String packageName, final String signatureDigest,
+            final TrustConfig trust) throws GeneralSecurityException {
         if (signatureDigest.length() != SHA256_DIGEST_LENGTH * 2) {
             throw new GeneralSecurityException("invalid Auditor signing digest length");
         }
-        if (!AUDITOR_APP_SIGNATURE_DIGEST_RELEASE.isEmpty() &&
-                AUDITOR_APP_SIGNATURE_DIGEST_RELEASE.equals(signatureDigest)) {
+        if (AUDITOR_APP_PACKAGE_NAME_RELEASE.equals(packageName)) {
+            if (trust.auditorReleaseSigner.isEmpty() || !trust.auditorReleaseSigner.equals(signatureDigest)) {
+                throw new GeneralSecurityException("invalid Auditor app signing key");
+            }
             return AUDITOR_APP_VARIANT_RELEASE;
         }
-        if (AUDITOR_APP_SIGNATURE_DIGEST_RELEASE_GRAPHENEOS.equals(signatureDigest)) {
+        if (AUDITOR_APP_PACKAGE_NAME_RELEASE_GRAPHENEOS.equals(packageName)) {
+            if (!AUDITOR_APP_SIGNATURE_DIGEST_RELEASE_GRAPHENEOS.equals(signatureDigest)) {
+                throw new GeneralSecurityException("invalid Auditor app signing key");
+            }
             return AUDITOR_APP_VARIANT_RELEASE_GRAPHENEOS;
         }
-        throw new GeneralSecurityException("invalid Auditor app signing key");
+        return -1;
     }
+
+    // Issue time and, for an initial pairing, the account the challenge was issued to (or -1).
+    record PendingChallenge(long issued, long userId) {}
 
     private static final int AUDITOR_APP_MINIMUM_VERSION = 89;
     private static final int OS_VERSION_MINIMUM = 140000;
@@ -460,9 +470,11 @@ class AttestationProtocol {
         return FINGERPRINT_HASH_FUNCTION.hashBytes(certificate.getEncoded()).asBytes();
     }
 
+    // profile2Device and evidence are set for pairings without a manufacturer-rooted chain
     private record Verified(String device, String verifiedBootKey, byte[] verifiedBootHash,
             String osName, int osVersion, int osPatchLevel, int vendorPatchLevel, int bootPatchLevel,
-            int appVersion, int appVariant, int securityLevel, boolean attestKey) {
+            int appVersion, int appVariant, int securityLevel, boolean attestKey,
+            PendingChallenge challenge, TrustConfig.Device profile2Device, Profile2.Evidence evidence) {
 
         boolean hasPogoPins() {
             return DEVICE_PIXEL_TABLET.equals(device);
@@ -474,16 +486,35 @@ class AttestationProtocol {
         return (X509Certificate) CertificateFactory.getInstance("X.509").generateCertificate(in);
     }
 
+    // Removes the leaf's challenge from the pending set, so no report can be used twice.
+    private static PendingChallenge consumeChallenge(final Certificate leaf,
+            final Cache<ByteBuffer, PendingChallenge> pendingChallenges) throws GeneralSecurityException {
+        final byte[] challenge;
+        try {
+            challenge = ParsedAttestationRecord.createParsedAttestationRecord(
+                    List.of((X509Certificate) leaf)).attestationChallenge;
+        } catch (final IOException | ParsedAttestationRecord.KeyDescriptionMissingException e) {
+            throw new GeneralSecurityException(e);
+        }
+        final PendingChallenge pending = pendingChallenges.asMap().remove(ByteBuffer.wrap(challenge));
+        if (pending == null) {
+            throw new GeneralSecurityException("challenge not pending");
+        }
+        return pending;
+    }
+
     private static Verified verifyStateless(final Certificate[] certificates,
-            final Cache<ByteBuffer, Boolean> pendingChallenges, final boolean hasPersistentKey,
-            final byte[][] validRoots) throws GeneralSecurityException {
+            final PendingChallenge pending, final boolean hasPersistentKey,
+            final byte[][] validRoots, final TrustConfig trust) throws GeneralSecurityException {
 
         verifyCertificateSignatures(certificates, hasPersistentKey);
 
         // check that the root certificate is a valid key attestation root
         final byte[] root = certificates[certificates.length - 1].getEncoded();
-        if (!Arrays.stream(validRoots).anyMatch(v -> Arrays.equals(v, root))) {
-            throw new GeneralSecurityException("root certificate is not a valid key attestation root");
+        // otherwise only a profile 2 chain can be accepted
+        final boolean manufacturerRooted = Arrays.stream(validRoots).anyMatch(v -> Arrays.equals(v, root));
+        if (!manufacturerRooted) {
+            Profile2.checkChainShape(certificates);
         }
 
         final ParsedAttestationRecord attestation;
@@ -505,11 +536,7 @@ class AttestationProtocol {
             throw new GeneralSecurityException("keymaster security level does not match attestation security level");
         }
 
-        // prevent replay attacks
-        final byte[] challenge = attestation.attestationChallenge;
-        if (pendingChallenges.asMap().remove(ByteBuffer.wrap(challenge)) == null) {
-            throw new GeneralSecurityException("challenge not pending");
-        }
+        // replay attacks are prevented by consumeChallenge
 
         // enforce communicating with the Auditor app via OS level security
         final AuthorizationList softwareEnforced = attestation.softwareEnforced;
@@ -532,8 +559,9 @@ class AttestationProtocol {
         final String signatureDigest = BaseEncoding.base16().encode(signatureDigests.get(0));
         final byte appVariant;
         final String packageName = info.packageName;
-        if (AUDITOR_APP_PACKAGE_NAME_RELEASE.equals(packageName)) {
-            appVariant = classifyReleaseSignature(signatureDigest);
+        final byte releaseVariant = classifyRelease(packageName, signatureDigest, trust);
+        if (releaseVariant >= 0) {
+            appVariant = releaseVariant;
         } else if (AUDITOR_APP_PACKAGE_NAME_PLAY.equals(packageName)) {
             if (!AUDITOR_APP_SIGNATURE_DIGEST_PLAY.equals(signatureDigest)) {
                 throw new GeneralSecurityException("invalid Auditor app signing key");
@@ -568,7 +596,17 @@ class AttestationProtocol {
         final RootOfTrust.VerifiedBootState verifiedBootState = rootOfTrust.verifiedBootState;
         final String verifiedBootKey = BaseEncoding.base16().encode(rootOfTrust.verifiedBootKey);
         final DeviceInfo device;
-        if (verifiedBootState == RootOfTrust.VerifiedBootState.SELF_SIGNED) {
+        TrustConfig.Device profile2Device = null;
+        Profile2.Evidence evidence = null;
+        if (!manufacturerRooted) {
+            if (appVariant != AUDITOR_APP_VARIANT_RELEASE) {
+                throw new GeneralSecurityException("pairing without a manufacturer root requires the DiamaneOS Auditor");
+            }
+            evidence = profile2Evidence(attestation, rootOfTrust, verifiedBootKey);
+            profile2Device = Profile2.device(trust, evidence);
+            // versions are matched exactly against the release list instead
+            device = new DeviceInfo(profile2Device.name(), 0, 0, false, profile2Device.osName(), false);
+        } else if (verifiedBootState == RootOfTrust.VerifiedBootState.SELF_SIGNED) {
             if (attestationSecurityLevelEnum == ParsedAttestationRecord.SecurityLevel.STRONG_BOX) {
                 device = fingerprintsStrongBoxNonStock.get(verifiedBootKey);
             } else {
@@ -745,9 +783,26 @@ class AttestationProtocol {
             throw new GeneralSecurityException("only initial key and attest key should have attestation extension");
         }
 
+        if (profile2Device != null && !attestKey) {
+            throw new GeneralSecurityException("missing pairing attest key");
+        }
+
         return new Verified(device.name, verifiedBootKey, verifiedBootHash, device.osName,
                 osVersion, osPatchLevel, vendorPatchLevel, bootPatchLevel, appVersion, appVariant,
-                ParsedAttestationRecord.securityLevelToInt(attestationSecurityLevelEnum), attestKey);
+                ParsedAttestationRecord.securityLevelToInt(attestationSecurityLevelEnum), attestKey,
+                pending, profile2Device, evidence);
+    }
+
+    private static Profile2.Evidence profile2Evidence(final ParsedAttestationRecord attestation,
+            final RootOfTrust rootOfTrust, final String verifiedBootKey) {
+        final AuthorizationList teeEnforced = attestation.teeEnforced;
+        return new Profile2.Evidence(verifiedBootKey,
+                BaseEncoding.base16().encode(rootOfTrust.verifiedBootHash.orElse(new byte[0])),
+                rootOfTrust.deviceLocked, rootOfTrust.verifiedBootState,
+                ParsedAttestationRecord.securityLevelToInt(attestation.attestationSecurityLevel),
+                teeEnforced.osVersion.orElse(0), teeEnforced.osPatchLevel.orElse(0),
+                teeEnforced.vendorPatchLevel.orElse(0), teeEnforced.bootPatchLevel.orElse(0),
+                attestation.attestationVersion, attestation.keymasterVersion);
     }
 
     // Only checks expiry beyond the initial certificate for the initial pairing since the
@@ -805,13 +860,14 @@ class AttestationProtocol {
     }
 
     private static void verify(final byte[] fingerprint,
-            final Cache<ByteBuffer, Boolean> pendingChallenges, final long userId,
+            final Cache<ByteBuffer, PendingChallenge> pendingChallenges, final long userId,
             final boolean paired, final ByteBuffer signedMessage, final byte[] signature,
             final Certificate[] attestationCertificates, final boolean userProfileSecure,
             final boolean accessibility, final boolean deviceAdmin,
             final boolean deviceAdminNonSystem, final boolean adbEnabled,
             final boolean addUsersWhenLocked, final boolean enrolledBiometrics,
-            final boolean systemUser, final SecurityStateExt securityStateExt)
+            final boolean systemUser, final SecurityStateExt securityStateExt,
+            final TrustConfig trust, final ReleaseList releases)
             throws GeneralSecurityException, IOException, SQLiteException {
         final String fingerprintHex = BaseEncoding.base16().encode(fingerprint);
         final byte[] currentFingerprint = getFingerprint(attestationCertificates[0]);
@@ -820,7 +876,11 @@ class AttestationProtocol {
             throw new GeneralSecurityException("must be authenticated with subscribeKey for initial verification");
         }
 
+        final PendingChallenge pending = consumeChallenge(attestationCertificates[0], pendingChallenges);
+
         final SQLiteConnection conn = AttestationServer.getLocalAttestationConn();
+        // set once a paired profile 2 device has signed this report with its pinned key
+        boolean authenticatedProfile2 = false;
         try {
             conn.exec("BEGIN IMMEDIATE TRANSACTION");
 
@@ -833,6 +893,7 @@ class AttestationProtocol {
             int pinnedAppVersion = Integer.MAX_VALUE;
             int pinnedAppVariant = 0;
             int pinnedSecurityLevel = 1;
+            int pinnedTrustProfile = 1;
             if (hasPersistentKey) {
                 final SQLiteStatement st = conn.prepare("""
                         SELECT
@@ -845,7 +906,8 @@ class AttestationProtocol {
                             pinnedAppVersion,
                             pinnedAppVariant,
                             pinnedSecurityLevel,
-                            userId
+                            userId,
+                            trustProfile
                         FROM Devices WHERE fingerprint = ?""");
                 try {
                     st.bind(1, fingerprint);
@@ -866,6 +928,7 @@ class AttestationProtocol {
                         if (userId != st.columnLong(9)) {
                             throw new GeneralSecurityException("wrong userId");
                         }
+                        pinnedTrustProfile = st.columnInt(10);
                     } else {
                         throw new GeneralSecurityException(
                                 "Pairing data for this Auditee is missing. Cannot perform paired attestation.\n" +
@@ -877,18 +940,10 @@ class AttestationProtocol {
                 }
             }
 
-            final Verified verified = verifyStateless(attestationCertificates, pendingChallenges, hasPersistentKey,
-                    new byte[][]{GOOGLE_ROOT_CERTIFICATE_0, GOOGLE_ROOT_CERTIFICATE_1,
-                        GOOGLE_ROOT_CERTIFICATE_2, GOOGLE_ROOT_CERTIFICATE_3,
-                        GOOGLE_ROOT_CERTIFICATE_4,
-                    });
-            final byte[] verifiedBootKey = BaseEncoding.base16().decode(verified.verifiedBootKey);
-
-            final long now = System.currentTimeMillis();
-
+            // A paired device's report is authenticated before the other checks, so every
+            // failure it reports can raise an alert.
             if (hasPersistentKey) {
                 final int chainOffset;
-                final int pinOffset;
                 if (attestationCertificates.length != pinnedCertificates.length) {
                     if (attestationCertificates.length == 5 && pinnedCertificates.length == 4) {
                         // backwards compatible use of attest key without the security benefits for
@@ -911,7 +966,27 @@ class AttestationProtocol {
                     throw new GeneralSecurityException("corrupt Auditor pinning data");
                 }
                 verifySignature(persistentCertificate.getPublicKey(), signedMessage, signature);
+                authenticatedProfile2 = pinnedTrustProfile == 2;
+                if (authenticatedProfile2 && releases == null) {
+                    throw new Profile2.ReleaseListUnavailableException();
+                }
+            }
 
+            final Verified verified = verifyStateless(attestationCertificates, pending, hasPersistentKey,
+                    new byte[][]{GOOGLE_ROOT_CERTIFICATE_0, GOOGLE_ROOT_CERTIFICATE_1,
+                        GOOGLE_ROOT_CERTIFICATE_2, GOOGLE_ROOT_CERTIFICATE_3,
+                        GOOGLE_ROOT_CERTIFICATE_4,
+                    }, trust);
+            final byte[] verifiedBootKey = BaseEncoding.base16().decode(verified.verifiedBootKey);
+            final boolean profile2 = verified.profile2Device != null;
+            if (profile2 && releases == null) {
+                throw new Profile2.ReleaseListUnavailableException();
+            }
+
+            final long now = System.currentTimeMillis();
+            String reviewFlags = null;
+
+            if (hasPersistentKey) {
                 if (!Arrays.equals(verifiedBootKey, pinnedVerifiedBootKey)) {
                     throw new GeneralSecurityException("pinned verified boot key mismatch");
                 }
@@ -932,6 +1007,12 @@ class AttestationProtocol {
                 }
                 if (verified.securityLevel != pinnedSecurityLevel) {
                     throw new GeneralSecurityException("Security level mismatch");
+                }
+                if (profile2 != (pinnedTrustProfile == 2)) {
+                    throw new GeneralSecurityException("trust profile mismatch");
+                }
+                if (profile2) {
+                    Profile2.match(releases, verified.profile2Device, verified.evidence);
                 }
 
                 final SQLiteStatement update = conn.prepare("""
@@ -1002,6 +1083,19 @@ class AttestationProtocol {
                     update.dispose();
                 }
             } else {
+                if (profile2) {
+                    if (verified.challenge.userId() != userId) {
+                        throw new GeneralSecurityException("challenge was not issued to this account");
+                    }
+                    final long responseMs = now - verified.challenge.issued();
+                    Profile2.checkFreshness(responseMs, Profile2.CHALLENGE_LIFETIME_MS);
+                    Profile2.match(releases, verified.profile2Device, verified.evidence);
+                    reviewFlags = String.join(", ", Profile2.reviewFlags(attestationCertificates, responseMs));
+                    if (pendingDevices(conn, userId) >= AttestationServer.MAX_PENDING_DEVICES) {
+                        throw new GeneralSecurityException("too many phones waiting for approval");
+                    }
+                }
+
                 verifySignature(attestationCertificates[0].getPublicKey(), signedMessage, signature);
 
                 final SQLiteStatement insert = conn.prepare("""
@@ -1032,8 +1126,11 @@ class AttestationProtocol {
                             oemUnlockAllowed2,
                             verifiedTimeFirst,
                             verifiedTimeLast,
-                            userId
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""");
+                            userId,
+                            trustProfile,
+                            reviewFlags,
+                            pending
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""");
                 try {
                     insert.bind(1, fingerprint);
                     insert.bind(2, encodeChain(DEFLATE_DICTIONARY_4, attestationCertificates));
@@ -1080,6 +1177,12 @@ class AttestationProtocol {
                     insert.bind(25, now);
                     insert.bind(26, now);
                     insert.bind(27, userId);
+                    insert.bind(28, profile2 ? 2 : 1);
+                    if (reviewFlags != null) {
+                        insert.bind(29, reviewFlags);
+                    }
+                    // a profile 2 phone waits for the account holder's approval
+                    insert.bind(30, profile2 ? 1 : 0);
                     insert.step();
                 } finally {
                     insert.dispose();
@@ -1157,8 +1260,42 @@ class AttestationProtocol {
             }
 
             conn.exec("COMMIT TRANSACTION");
+        } catch (final GeneralSecurityException e) {
+            if (authenticatedProfile2) {
+                recordFailure(conn, fingerprint, e.getMessage());
+            }
+            throw e;
         } finally {
             AttestationServer.rollbackIfNeeded(conn);
+        }
+    }
+
+    private static long pendingDevices(final SQLiteConnection conn, final long userId) throws SQLiteException {
+        final SQLiteStatement select = conn.prepare(
+                "SELECT count(*) FROM Devices WHERE userId = ? AND pending = 1 AND deletionTime IS NULL");
+        try {
+            select.bind(1, userId);
+            select.step();
+            return select.columnLong(0);
+        } finally {
+            select.dispose();
+        }
+    }
+
+    // Keeps the failure while the rest of the report is rolled back, so the alert dispatcher can
+    // tell the account.
+    private static void recordFailure(final SQLiteConnection conn, final byte[] fingerprint,
+            final String reason) throws SQLiteException {
+        AttestationServer.rollbackIfNeeded(conn);
+        final SQLiteStatement update = conn.prepare(
+                "UPDATE Devices SET failureTimeLast = ?, failureReason = ? WHERE fingerprint = ?");
+        try {
+            update.bind(1, System.currentTimeMillis());
+            update.bind(2, reason);
+            update.bind(3, fingerprint);
+            update.step();
+        } finally {
+            update.dispose();
         }
     }
 
@@ -1215,7 +1352,15 @@ class AttestationProtocol {
     }
 
     static void verifySerialized(final byte[] attestationResult,
-            final Cache<ByteBuffer, Boolean> pendingChallenges, final long userId, final boolean paired)
+            final Cache<ByteBuffer, PendingChallenge> pendingChallenges, final long userId, final boolean paired)
+            throws DataFormatException, GeneralSecurityException, IOException, SQLiteException {
+        verifySerialized(attestationResult, pendingChallenges, userId, paired, TrustConfig.get(),
+                ReleaseListStore.current());
+    }
+
+    static void verifySerialized(final byte[] attestationResult,
+            final Cache<ByteBuffer, PendingChallenge> pendingChallenges, final long userId, final boolean paired,
+            final TrustConfig trust, final ReleaseList releases)
             throws DataFormatException, GeneralSecurityException, IOException, SQLiteException {
         final ByteBuffer deserializer = ByteBuffer.wrap(attestationResult);
         final byte version = deserializer.get();
@@ -1268,6 +1413,7 @@ class AttestationProtocol {
 
         verify(fingerprint, pendingChallenges, userId, paired, deserializer.asReadOnlyBuffer(), signature,
                 certificates, userProfileSecure, accessibility, deviceAdmin, deviceAdminNonSystem,
-                adbEnabled, addUsersWhenLocked, enrolledBiometrics, systemUser, securityStateExt);
+                adbEnabled, addUsersWhenLocked, enrolledBiometrics, systemUser, securityStateExt,
+                trust, releases);
     }
 }
