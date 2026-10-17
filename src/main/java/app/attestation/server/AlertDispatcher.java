@@ -158,7 +158,7 @@ class AlertDispatcher implements Runnable {
                             "A new device started checking in after these devices stopped:\n\n" +
                             entry.getValue() + "\nWas the old phone reset? Retire it.\n\n" +
                             "Log in to https://" + AttestationServer.DOMAIN + "/ and select Retire on the old device. " +
-                            "Its record and history are kept and it stops raising alerts.\n\n" +
+                            "It stops raising alerts, and its record and history are kept until 90 days after its last successful check.\n\n" +
                             "If you do not want to receive these emails and cannot log in to the account,\nemail " +
                             emailFrom + " from the address receiving them.");
                     Transport.send(message);

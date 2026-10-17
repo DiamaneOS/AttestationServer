@@ -368,7 +368,7 @@ function fetchDevices() {
                     "Was the old phone reset? Retire it."));
                 const retireButton = info.appendChild(create("button", "retire device"));
                 retireButton.onclick = event => {
-                    if (confirm(`Retire the device ${fingerprint}? Its record and history are kept and it stops raising alerts.`)) {
+                    if (confirm(`Retire the device ${fingerprint}? It stops raising alerts, and its record and history are kept until 90 days after its last successful check.`)) {
                         event.target.disabled = true;
                         post("/api/retire-device", JSON.stringify({"fingerprint": device.fingerprint})).then(response => {
                             if (!response.ok) {
