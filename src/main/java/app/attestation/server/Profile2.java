@@ -25,8 +25,9 @@ final class Profile2 {
     // fresh key, pairing attest key, local root attest key without attestation data
     static final int CHAIN_LENGTH = 3;
     static final long CHALLENGE_LIFETIME_MS = 30 * 1000;
-    // faster than a phone generates three hardware keys and answers over the network
-    static final long FAST_RESPONSE_MS = 250;
+    // faster than a phone generates three hardware keys and answers over the network. A real FP6
+    // took 0.28 s with the server on the same desk and 0.6 to 1 s over the internet.
+    static final long FAST_RESPONSE_MS = 100;
 
     record Evidence(String verifiedBootKey, String verifiedBootHash, boolean deviceLocked,
             RootOfTrust.VerifiedBootState verifiedBootState, int securityLevel, int osVersion,
