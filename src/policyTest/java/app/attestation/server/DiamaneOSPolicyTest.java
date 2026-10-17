@@ -21,6 +21,9 @@ public final class DiamaneOSPolicyTest {
                 AttestationProtocol.fingerprintsNonStock.get("0".repeat(64)) == null,
                 "unknown verified-boot keys must not receive an FP6 exception");
         final TrustConfig trust = TrustConfig.get();
+        require(trust.releaseListSigners.keySet().equals(java.util.Set.of(
+                "0B0A4D2CD3680FF4F3993CA8A61CDA93417680F5151090154EDCD52655C7E4AB")),
+                "release lists must be signed by the offline policy key");
         require(AttestationProtocol.classifyRelease("app.attestation.auditor",
                 "990E04F0864B19F14F84E0E432F7A393F297AB105A22C1E1B10B442A4A62C42C", trust) == 3,
                 "upstream signer must retain its distinct pairing variant");

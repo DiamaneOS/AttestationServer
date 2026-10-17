@@ -2,7 +2,7 @@
   "format": "diamaneos-attestation-trust",
   "version": 1,
   "auditorReleaseSigner": "427BFD360586B829475F37ABFFD2548D93DB3618E45C994DE416469EF04BC2EC",
-  "releaseListSigners": [],
+  "releaseListSigners": ["MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEobfg2nj0QgbK2ff+xoPCgfcG6oHlp9EaBtPRjxfE5kaPLpX8pSTbLMV/A/yUapD2Jmu7RuG0enZW5Wfc5BaFUQ=="],
   "devices": [
     {
       "id": "FP6",
