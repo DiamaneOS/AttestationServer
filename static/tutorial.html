@@ -3,23 +3,21 @@
     <head>
         <meta charset="utf-8"/>
         <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
-        <title>Tutorial | attestation.app</title>
+        <title>Tutorial · DiamaneOS attestation</title>
         {{css|/main.css}}
-        <meta name="description" content="Tutorial on using the Auditor Android app and associated service."/>
+        <meta name="description" content="How to set up remote verification of a DiamaneOS phone with Auditor."/>
         <meta name="theme-color" content="#212121"/>
         <meta name="color-scheme" content="dark light"/>
-        <meta name="twitter:site" content="@GrapheneOS"/>
-        <meta name="twitter:creator" content="@GrapheneOS"/>
         <meta property="og:title" content="Auditor tutorial"/>
-        <meta property="og:description" content="Tutorial on using the Auditor Android app and associated service."/>
+        <meta property="og:description" content="How to set up remote verification of a DiamaneOS phone with Auditor."/>
         <meta property="og:type" content="website"/>
-        <meta property="og:image" content="https://attestation.app/opengraph.png"/>
+        <meta property="og:image" content="https://attestation.diamaneos.de/opengraph.png"/>
         <meta property="og:image:width" content="512"/>
         <meta property="og:image:height" content="512"/>
         <meta property="og:image:alt" content="Auditor logo"/>
-        <meta property="og:url" content="https://attestation.app/tutorial"/>
-        <meta property="og:site_name" content="attestation.app"/>
-        <link rel="canonical" href="https://attestation.app/tutorial"/>
+        <meta property="og:url" content="https://attestation.diamaneos.de/tutorial"/>
+        <meta property="og:site_name" content="DiamaneOS attestation"/>
+        <link rel="canonical" href="https://attestation.diamaneos.de/tutorial"/>
         <link rel="icon" href="/favicon.ico"/>
         <link rel="icon" sizes="any" type="image/svg+xml" href="/favicon.svg"/>
         <link rel="mask-icon" href="/mask-icon.svg" color="#000000"/>
@@ -32,12 +30,10 @@
             <nav id="site-menu">
                 <ul>
                     <li><a href="/">Device integrity monitoring</a></li>
-                    <li><a href="/about">About</a></li>
                     <li aria-current="page"><a href="/tutorial">Tutorial</a></li>
                     <li><a href="/source">Source</a></li>
                     <li><a href="/privacy-policy">Privacy policy</a></li>
                     <li><a href="https://diamaneos.de/legal/#impressum" rel="noreferrer">Impressum</a></li>
-                    <li><a href="/donate">Donate</a></li>
                     <li><a href="/contact">Contact</a></li>
                 </ul>
             </nav>
@@ -50,23 +46,66 @@
                     <a href="#installation">Installation</a>
                 </h2>
 
-                <p>This app is
-                <a href="https://play.google.com/store/apps/details?id=app.attestation.auditor.play">available
-                through the Play Store with the <code>app.attestation.auditor.play</code>
-                app ID</a>. Play Store releases go through review and it usually takes around 1 to
-                3 days before the Play Store pushes out the update to users. Play Store releases use
-                Play Signing, so we use a separate app ID from the releases we publish ourselves to
-                avoid conflicts and to distinguish between them.</p>
+                <p>DiamaneOS includes Auditor with the app ID <code>de.diamaneos.auditor</code>. It
+                is built from the <a href="https://github.com/DiamaneOS/Auditor">DiamaneOS Auditor
+                source</a> and updated with the OS.</p>
+            </section>
 
-                <p>Releases of the app signed by GrapheneOS with the
-                <code>app.attestation.auditor</code> app ID are published in the GrapheneOS app
-                repository and on GitHub. These releases are also bundled as part of GrapheneOS.
-                You can use the <a href="https://github.com/GrapheneOS/Apps/releases">GrapheneOS
-                app repository client</a> on Android 12 or later for automatic updates.</p>
+            <section id="remote-verification">
+                <h2>
+                    <a href="#remote-verification">Remote verification</a>
+                </h2>
 
-                <p>Releases are initially pushed out through the Alpha channel for both
-                the Play Store and our app repository, then get moved to the Beta channel and
-                finally the Stable channel.</p>
+                <p>This service checks a phone on a schedule and can email you when the phone does
+                not send a valid check in time.</p>
+
+                <ol>
+                    <li>Create an account on this site.</li>
+                    <li>Open this site on the phone, log in and tap Add this phone. Auditor opens and
+                    asks you to confirm the account.</li>
+                    <li>Instead of the button, you can select "Enable remote verification" in the
+                    Auditor menu and scan the QR code shown for your account on another device.</li>
+                    <li>Set an alert email address under Configuration to receive alerts.</li>
+                    <li>Reload the account page to see the first result.</li>
+                </ol>
+            </section>
+
+            <section id="first-pairing">
+                <h2>
+                    <a href="#first-pairing">First pairing not verified by hardware</a>
+                </h2>
+
+                <p>On some phones the device maker cannot vouch for the first pairing. Auditor then
+                asks you to confirm how the phone was set up. Only continue if you trust how it was
+                set up. The account page and alert emails label these phones "First pairing not
+                verified by hardware".</p>
+
+                <p>The first pairing must exactly match an official DiamaneOS release. Every later
+                check is hardware attestation pinned to that first pairing.</p>
+
+                <p>A new phone of this kind waits for your approval on the account page. If the
+                account has an alert email address, you get an email with the phone's details. The
+                phone is not monitored until you approve it. Reject it if you did not add it
+                yourself. An account can have up to three phones waiting.</p>
+
+                <p>A pairing can be flagged for review, for example when the phone answered faster
+                than a real phone can. A flag does not reject the pairing, but check that you added
+                the phone yourself before approving it. Once approved, every failed check from the
+                phone raises an alert.</p>
+            </section>
+
+            <section id="after-a-reset">
+                <h2>
+                    <a href="#after-a-reset">After a reset</a>
+                </h2>
+
+                <p>A factory reset erases Auditor's key, so the phone must be paired again. It then
+                appears as a new device.</p>
+
+                <p>When the old record stops checking in after a newer device joined the account,
+                the account page and an email ask whether the old phone was reset. If it was,
+                retire the old record. A retired record raises no alerts and its checks are refused.
+                It stays until it expires like any inactive device.</p>
             </section>
 
             <section id="local-verification">
@@ -74,57 +113,10 @@
                     <a href="#local-verification">Local verification</a>
                 </h2>
 
-                <p>The device being verified (Auditee) must be one of the supported devices. Android
-                developer previews aren't supported since the hardware verified version is set to a
-                placeholder value. The device performing verification (Auditor) just needs to be any
-                Android 13 or higher device with a camera.</p>
-
-                <ol>
-                    <li>press Auditor on the device that will be verifying the Auditee</li>
-                    <li>press Auditee on the device that's going to be verified</li>
-                    <li>point the camera of the Auditee at the QR code on the Auditor to read the challenge</li>
-                    <li>tap the QR code on the Auditor to advance ahead (if you do this too early, you can press back)</li>
-                    <li>point the camera of the Auditor at the QR code on the Auditee to read the attestation</li>
-                    <li>view verification of the attestation results</li>
-                </ol>
-
-                <p>An Auditor can verify any number of different Auditee devices. It shows a
-                fingerprint and the first or last verification time in successful paired attestation
-                results. An Auditee can be verified by any number of Auditors but there will be a
-                different fingerprint for each unique pairing rather than the same fingerprint shown
-                on each Auditor for the same Auditee.</p>
-            </section>
-
-            <section id="scheduled-remote-verification">
-                <h2>
-                    <a href="#scheduled-remote-verification">Scheduled remote verification</a>
-                </h2>
-
-                <p>To set up regularly scheduled remote verification via the remote attestation service:</p>
-
-                <ol>
-                    <li>create an account on https://attestation.app/ from a separate device</li>
-                    <li>press the 'Enable remote verification' button in the app</li>
-                    <li>scan the account QR code displayed on https://attestation.app/</li>
-                    <li>configure an alert email address to receive alerts if the device fails to provide valid attestations in time</li>
-                    <li>refresh https://attestation.app/ to view the initial attestation result</li>
-                </ol>
-            </section>
-
-            <section id="expanding-device-support">
-                <h2>
-                    <a href="#expanding-device-support">Expanding device support</a>
-                </h2>
-                <p>Support for verifying a device needs to be added to the app based on at least one
-                valid key attestation sample from the stock OS with the bootloader locked. The Auditor
-                app can theoretically support verifying any Android devices launched with Android 8 or
-                later. An upgrade to Android 8 isn't enough since hardware key attestation support is
-                required and the minimum requirements only became mandatory with Android 8.</p>
-
-                <p>To submit a sample, open the menu from the action bar and select 'Submit sample
-                data'. This will submit a sample attestation and device information, enabling the
-                development of support for the device. It may take a few weeks before support is
-                shipped in a new version of the app.</p>
+                <p>Auditor can also check a phone from a second phone running the DiamaneOS Auditor,
+                without this service. <a href="https://diamaneos.de/documentation/attestation/"
+                rel="noreferrer">Attestation explained</a> describes both ways and what a result
+                can establish.</p>
             </section>
         </main>
     </body>
