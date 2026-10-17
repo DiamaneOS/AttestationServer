@@ -35,4 +35,4 @@ The database retains accounts, device pairing information, verification history 
 
 The [Debian deployment](https://github.com/DiamaneOS/infrastructure/tree/main/debian) separates root-owned code from application-writable encrypted state. The service account has no login or deployment permissions. `nginx/service-state.conf` controls public enrollment.
 
-The inherited website publisher is disabled. The staged server configuration excludes upstream website assets and identity files; nginx blocks their legacy donation, contact and signing paths even when enrollment is enabled.
+The inherited website publisher is disabled. The site's pages are rewritten for DiamaneOS, and the donation pages are removed. The staged server configuration excludes upstream website assets and identity files. Nginx blocks their legacy donation and signing paths even when enrollment is enabled.
