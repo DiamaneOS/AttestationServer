@@ -33,6 +33,24 @@ class AlertDispatcher implements Runnable {
 
     private record Account(long userId, String username, int alertDelay) {}
 
+    static final String PROFILE_2_LABEL = "First pairing not verified by hardware";
+
+    private static void appendFingerprint(final StringBuilder builder, final byte[] fingerprint,
+            final int trustProfile) {
+        builder.append("* ");
+        final String encoded = BaseEncoding.base16().encode(fingerprint);
+        for (int i = 0; i < encoded.length(); i += FINGERPRINT_SPLIT_INTERVAL) {
+            builder.append(encoded, i, Math.min(encoded.length(), i + FINGERPRINT_SPLIT_INTERVAL));
+            if (i + FINGERPRINT_SPLIT_INTERVAL < encoded.length()) {
+                builder.append("-");
+            }
+        }
+        if (trustProfile == 2) {
+            builder.append(" (").append(PROFILE_2_LABEL).append(")");
+        }
+        builder.append("\n");
+    }
+
     @Override
     public void run() {
         final SQLiteConnection conn;
@@ -47,6 +65,8 @@ class AlertDispatcher implements Runnable {
         final SQLiteStatement selectExpired;
         final SQLiteStatement updateExpired;
         final SQLiteStatement selectFailed;
+        final SQLiteStatement selectAccountsForFailureAlert;
+        final SQLiteStatement updateFailureAlert;
         final SQLiteStatement selectEmails;
         try {
             selectConfiguration = conn.prepare("""
@@ -63,13 +83,22 @@ class AlertDispatcher implements Runnable {
                         AND verifiedTimeLast < ? - alertDelay * 1000 AND deletionTime is NULL
                         AND (expiredTimeLast IS NULL OR expiredTimeLast < ?))""");
             selectExpired = conn.prepare("""
-                    SELECT fingerprint FROM Devices
+                    SELECT fingerprint, trustProfile FROM Devices
                     WHERE userId = ? AND verifiedTimeLast < ? AND deletionTime IS NULL""");
             updateExpired = conn.prepare(
                     "UPDATE Devices SET expiredTimeLast = ? WHERE fingerprint = ?");
             selectFailed = conn.prepare("""
-                    SELECT fingerprint FROM Devices
-                    WHERE userId = ? AND failureAlertTime < failureTimeLast AND deletionTime IS NULL""");
+                    SELECT fingerprint, trustProfile, failureReason FROM Devices
+                    WHERE userId = ? AND failureTimeLast > coalesce(failureAlertTime, 0)
+                    AND trustProfile = 2 AND deletionTime IS NULL""");
+            // Only profile 2 devices record failures, so profile 1 alerting is unchanged.
+            selectAccountsForFailureAlert = conn.prepare("""
+                    SELECT userId, username, alertDelay FROM Accounts
+                    WHERE EXISTS (SELECT 1 FROM Devices WHERE userId = Accounts.userId
+                        AND failureTimeLast > coalesce(failureAlertTime, 0) AND trustProfile = 2
+                        AND deletionTime IS NULL)""");
+            updateFailureAlert = conn.prepare(
+                    "UPDATE Devices SET failureAlertTime = ? WHERE userId = ? AND trustProfile = 2");
             selectEmails = conn.prepare("SELECT address FROM EmailAddresses WHERE userId = ?");
         } catch (final SQLiteException e) {
             conn.dispose();
@@ -167,19 +196,7 @@ class AlertDispatcher implements Runnable {
                         while (selectExpired.step()) {
                             final byte[] fingerprint = selectExpired.columnBlob(0);
                             expiredFingerprints.add(fingerprint);
-
-                            expired.append("* ");
-
-                            final String encoded = BaseEncoding.base16().encode(fingerprint);
-
-                            for (int i = 0; i < encoded.length(); i += FINGERPRINT_SPLIT_INTERVAL) {
-                                expired.append(encoded, i, Math.min(encoded.length(), i + FINGERPRINT_SPLIT_INTERVAL));
-                                if (i + FINGERPRINT_SPLIT_INTERVAL < encoded.length()) {
-                                    expired.append("-");
-                                }
-                            }
-
-                            expired.append("\n");
+                            appendFingerprint(expired, fingerprint, selectExpired.columnInt(1));
                         }
                     } finally {
                         selectExpired.reset();
@@ -232,15 +249,26 @@ class AlertDispatcher implements Runnable {
                 }
 
                 final ArrayList<Account> accountsForFailureAlert = new ArrayList<>();
+                try {
+                    while (selectAccountsForFailureAlert.step()) {
+                        accountsForFailureAlert.add(new Account(
+                                selectAccountsForFailureAlert.columnLong(0),
+                                selectAccountsForFailureAlert.columnString(1),
+                                selectAccountsForFailureAlert.columnInt(2)));
+                    }
+                } finally {
+                    selectAccountsForFailureAlert.reset();
+                }
 
                 for (final Account account : accountsForFailureAlert) {
                     final StringBuilder failed = new StringBuilder();
                     try {
                         selectFailed.bind(1, account.userId);
                         while (selectFailed.step()) {
-                            final byte[] fingerprint = selectFailed.columnBlob(0);
-                            final String encoded = BaseEncoding.base16().encode(fingerprint);
-                            failed.append("* ").append(encoded).append("\n");
+                            appendFingerprint(failed, selectFailed.columnBlob(0), selectFailed.columnInt(1));
+                            if (!selectFailed.columnNull(2)) {
+                                failed.append("  ").append(selectFailed.columnString(2)).append("\n");
+                            }
                         }
                     } finally {
                         selectFailed.reset();
@@ -277,6 +305,14 @@ class AlertDispatcher implements Runnable {
                         } catch (final MessagingException | UnsupportedEncodingException e) {
                             logger.log(Level.WARNING, "email error", e);
                         }
+                    }
+
+                    try {
+                        updateFailureAlert.bind(1, now);
+                        updateFailureAlert.bind(2, account.userId);
+                        updateFailureAlert.step();
+                    } finally {
+                        updateFailureAlert.reset();
                     }
                 }
             } catch (final SQLiteException e) {

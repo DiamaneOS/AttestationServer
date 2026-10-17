@@ -20,6 +20,7 @@ const configuration = document.getElementById("configuration");
 const devices = document.getElementById("devices");
 const qr = document.getElementById("qr");
 const rotate = document.getElementById("rotate");
+const profile2Label = "First pairing not verified by hardware";
 const accountContent = document.getElementById("account_content");
 
 const deviceAdminStrings = new Map([
@@ -329,6 +330,17 @@ function fetchDevices() {
                     });
                 }
             };
+
+            if (device.trustProfile == 2) {
+                info.appendChild(create("p", null)).appendChild(create("strong", profile2Label));
+                if (device.reviewFlags !== undefined) {
+                    appendLine(info, "Flagged for review: " + device.reviewFlags);
+                }
+            }
+            if (device.failureTimeLast !== undefined) {
+                appendLine(info, "Last failed check: " + new Date(device.failureTimeLast) +
+                    (device.failureReason !== undefined ? " (" + device.failureReason + ")" : ""));
+            }
 
             info.appendChild(create("h3", "Hardware verified information:"));
             info.appendChild(document.createTextNode("Pairing identity (hash of pinned hardware-backed key): "));

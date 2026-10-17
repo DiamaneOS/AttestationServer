@@ -91,9 +91,17 @@ class AttestationServer {
         "(contact|security|webmaster)@(attestation.app|grapheneos.org|seamlessupdate.app)"
     };
 
-    private static final Cache<ByteBuffer, Boolean> pendingChallenges = Caffeine.newBuilder()
+    private static final Cache<ByteBuffer, AttestationProtocol.PendingChallenge> pendingChallenges = Caffeine.newBuilder()
             .expireAfterWrite(1, TimeUnit.MINUTES)
             .maximumSize(1000000)
+            .build();
+
+    // Challenges bound to an account for an initial pairing, limited per account and hour.
+    static final int MAX_ACCOUNT_CHALLENGES_PER_HOUR = 10;
+    private static final Cache<Long, java.util.concurrent.atomic.AtomicInteger> accountChallenges =
+            Caffeine.newBuilder()
+            .expireAfterWrite(1, TimeUnit.HOURS)
+            .maximumSize(100000)
             .build();
 
     static SQLiteConnection open(final File db) throws SQLiteException {
@@ -204,7 +212,10 @@ class AttestationServer {
                 failureTimeLast INTEGER,
                 failureAlertTime INTEGER,
                 userId INTEGER NOT NULL REFERENCES Accounts (userId) ON DELETE CASCADE,
-                deletionTime INTEGER
+                deletionTime INTEGER,
+                trustProfile INTEGER NOT NULL DEFAULT 1 CHECK (trustProfile in (1, 2)),
+                reviewFlags TEXT,
+                failureReason TEXT
             ) STRICT;
 
             CREATE TABLE IF NOT EXISTS Attestations (
@@ -253,7 +264,19 @@ class AttestationServer {
             CREATE INDEX IF NOT EXISTS Attestations_fingerprint_id
             ON Attestations (fingerprint, id)""";
 
-    private static void setupAttestationDatabase() throws DataFormatException, GeneralSecurityException, IOException, SQLiteException {
+    private static boolean hasColumn(final SQLiteConnection conn, final String table, final String column)
+            throws SQLiteException {
+        final SQLiteStatement info = conn.prepare("SELECT 1 FROM pragma_table_info(?) WHERE name = ?");
+        try {
+            info.bind(1, table);
+            info.bind(2, column);
+            return info.step();
+        } finally {
+            info.dispose();
+        }
+    }
+
+    static void setupAttestationDatabase() throws DataFormatException, GeneralSecurityException, IOException, SQLiteException {
         final SQLiteConnection conn = open(ATTESTATION_DATABASE);
         try {
             final SQLiteStatement selectCreated = conn.prepare(
@@ -959,6 +982,26 @@ class AttestationServer {
                 logger.info("Migrated to schema version: " + userVersion);
             }
 
+            // trust profile 2, review flags and failure reasons
+            targetUserVersion = 18;
+            if (userVersion < targetUserVersion) {
+                conn.exec("BEGIN IMMEDIATE TRANSACTION");
+                final String[][] columns = {
+                    {"trustProfile", "INTEGER NOT NULL DEFAULT 1 CHECK (trustProfile in (1, 2))"},
+                    {"reviewFlags", "TEXT"},
+                    {"failureReason", "TEXT"},
+                };
+                for (final String[] column : columns) {
+                    if (!hasColumn(conn, "Devices", column[0])) {
+                        conn.exec("ALTER TABLE Devices ADD COLUMN " + column[0] + " " + column[1]);
+                    }
+                }
+                conn.exec("PRAGMA user_version = " + targetUserVersion);
+                conn.exec("COMMIT TRANSACTION");
+                userVersion = targetUserVersion;
+                logger.info("Migrated to schema version: " + userVersion);
+            }
+
             logger.info("Finished database setup for " + ATTESTATION_DATABASE);
         } finally {
             conn.dispose();
@@ -1004,6 +1047,7 @@ class AttestationServer {
             server.createContext("/api/account.png", new AccountQrHandler());
             server.createContext("/api/configuration", new ConfigurationHandler());
             server.createContext("/api/delete-device", new DeleteDeviceHandler());
+            server.createContext("/releases.json", new ReleaseListHandler());
             server.createContext("/api/devices.json", new DevicesHandler());
             server.createContext("/api/attestation-history.json", new AttestationHistoryHandler());
             server.createContext("/auditor/challenge", new ChallengeHandler());
@@ -1743,6 +1787,34 @@ class AttestationServer {
         }
     }
 
+    // Serves the signed release list this server verified and accepted.
+    private static class ReleaseListHandler implements HttpHandler {
+        @Override
+        public void handle(final HttpExchange exchange) throws IOException {
+            try {
+                if (!exchange.getRequestMethod().equals("GET")) {
+                    exchange.getResponseHeaders().set("Allow", "GET");
+                    exchange.sendResponseHeaders(405, -1);
+                    return;
+                }
+                ReleaseListStore.refresh();
+                final byte[] list = ReleaseListStore.currentBytes();
+                if (list == null) {
+                    exchange.sendResponseHeaders(404, -1);
+                    return;
+                }
+                exchange.getResponseHeaders().set("Content-Type", "application/json");
+                exchange.getResponseHeaders().set("Cache-Control", "no-cache");
+                exchange.sendResponseHeaders(200, list.length);
+                try (final OutputStream output = exchange.getResponseBody()) {
+                    output.write(list);
+                }
+            } finally {
+                exchange.close();
+            }
+        }
+    }
+
     private static String convertToPem(final byte[] derEncoded) {
         return "-----BEGIN CERTIFICATE-----\n" +
                 new String(Base64.getMimeEncoder(64, "\n".getBytes()).encode(derEncoded)) +
@@ -1782,7 +1854,11 @@ class AttestationServer {
                     verifiedTimeFirst,
                     verifiedTimeLast,
                     (SELECT min(id) FROM Attestations WHERE Attestations.fingerprint = Devices.fingerprint),
-                    (SELECT max(id) FROM Attestations WHERE Attestations.fingerprint = Devices.fingerprint)
+                    (SELECT max(id) FROM Attestations WHERE Attestations.fingerprint = Devices.fingerprint),
+                    trustProfile,
+                    reviewFlags,
+                    failureTimeLast,
+                    failureReason
                 FROM Devices WHERE userId is ? AND deletionTime IS NULL
                 ORDER BY verifiedTimeFirst""");
         try {
@@ -1817,8 +1893,32 @@ class AttestationServer {
                         info = fingerprintsStock.get(verifiedBootKey);
                     }
                 }
+                final int trustProfile = select.columnInt(28);
+                if (trustProfile == 2) {
+                    final List<TrustConfig.Device> configured;
+                    try {
+                        configured = TrustConfig.get().devicesFor(verifiedBootKey, pinnedSecurityLevel);
+                    } catch (final GeneralSecurityException e) {
+                        throw new IOException(e);
+                    }
+                    if (!configured.isEmpty()) {
+                        info = new DeviceInfo(configured.get(0).name(), 0, 0, false,
+                                configured.get(0).osName(), false);
+                    }
+                }
                 device.add("osName", info != null ? info.osName() : "Unknown (legacy device)");
                 device.add("name", info != null ? info.name() : "Unknown (legacy device)");
+                device.add("trustProfile", trustProfile);
+                if (!select.columnNull(29) && !select.columnString(29).isEmpty()) {
+                    device.add("reviewFlags", select.columnString(29));
+                }
+                if (!select.columnNull(30)) {
+                    device.add("failureTimeLast", select.columnLong(30));
+                    if (!select.columnNull(31)) {
+                        device.add("failureReason", select.columnString(31));
+                    }
+                }
+
                 if (!select.columnNull(4)) {
                     device.add("verifiedBootHash", select.columnString(4));
                 }
@@ -2020,11 +2120,62 @@ class AttestationServer {
         }
     }
 
+    // Returns the account for "Auditor <userId> <subscribeKey>", or -1 without a valid one.
+    private static long authenticateSubscribeKey(final String authorization) throws SQLiteException {
+        final String[] tokens = authorization.split(" ");
+        if (tokens.length != 3 || !tokens[0].equals("Auditor")) {
+            return -1;
+        }
+        final long userId;
+        final byte[] subscribeKey;
+        try {
+            userId = Long.parseLong(tokens[1]);
+            subscribeKey = BaseEncoding.base64().decode(tokens[2]);
+        } catch (final IllegalArgumentException e) {
+            return -1;
+        }
+        final SQLiteConnection conn = getLocalAttestationConn();
+        final SQLiteStatement select = conn.prepare("SELECT subscribeKey FROM Accounts WHERE userId = ?");
+        try {
+            select.bind(1, userId);
+            if (select.step() && MessageDigest.isEqual(subscribeKey, select.columnBlob(0))) {
+                return userId;
+            }
+            return -1;
+        } finally {
+            select.dispose();
+        }
+    }
+
+    static boolean allowAccountChallenge(final long userId) {
+        return accountChallenges.get(userId, k -> new java.util.concurrent.atomic.AtomicInteger())
+                .incrementAndGet() <= MAX_ACCOUNT_CHALLENGES_PER_HOUR;
+    }
+
     private static class ChallengeHandler extends AppPostHandler {
         @Override
-        public void handlePost(final HttpExchange exchange) throws IOException {
+        public void handlePost(final HttpExchange exchange) throws IOException, SQLiteException {
+            // An initial pairing can bind its challenge to the account (trust profile 2 requires it)
+            long userId = -1;
+            String authorization = null;
+            try {
+                authorization = getRequestHeaderValue(exchange, "Authorization");
+            } catch (final GeneralSecurityException e) {}
+            if (authorization != null) {
+                userId = authenticateSubscribeKey(authorization);
+                if (userId == -1) {
+                    exchange.sendResponseHeaders(403, -1);
+                    return;
+                }
+                if (!allowAccountChallenge(userId)) {
+                    exchange.sendResponseHeaders(429, -1);
+                    return;
+                }
+            }
+
             final byte[] challenge = AttestationProtocol.generateRandomToken();
-            pendingChallenges.put(ByteBuffer.wrap(challenge), true);
+            pendingChallenges.put(ByteBuffer.wrap(challenge),
+                    new AttestationProtocol.PendingChallenge(System.currentTimeMillis(), userId));
 
             final byte[] challengeMessage =
                     Bytes.concat(new byte[]{AttestationProtocol.PROTOCOL_VERSION},
@@ -2096,6 +2247,7 @@ class AttestationServer {
 
             final byte[] attestationResult = attestation.toByteArray();
 
+            ReleaseListStore.refresh();
             try {
                 AttestationProtocol.verifySerialized(attestationResult, pendingChallenges, userId, subscribeKey == null);
             } catch (final BufferUnderflowException | NegativeArraySizeException |
