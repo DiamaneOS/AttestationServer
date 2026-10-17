@@ -6,6 +6,7 @@ import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import com.google.common.io.BaseEncoding;
 
+import java.net.URLDecoder;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -129,8 +130,26 @@ public final class Profile2Test {
         final byte[] stolen = replaceFingerprint(other.message(), phone);
         rejected("certificate chain mismatch", () -> verify(stolen, alice, true, list2));
 
+        // reset: the new pairing is a new device, the old one is only retired on request
+        final Profile2Fixture reset = new Profile2Fixture();
+        reset.bootHash = release2;
+        reset.osPatchLevel = 202611;
+        reset.challenge = challenge(alice, 1000);
+        setLastVerified(phone, System.currentTimeMillis() - 13L * 60 * 60 * 1000);
+        verify(reset.message(), alice, false, list2);
         require(!retireSuggested(phone), "a pending phone does not replace the old one");
         require(AttestationServer.approveDevice(alice, fingerprint(reset)), "new phone approved");
+        require(retireSuggested(phone) && !retireSuggested(reset), "old phone suggested for retiring");
+        require(!AttestationServer.retireDevice(bob, fingerprint(phone)), "other account cannot retire it");
+        require(AttestationServer.retireDevice(alice, fingerprint(phone)), "account holder retires it");
+        require(!retireSuggested(phone), "retired device no longer suggested");
+        rejected("device retired", () -> {
+            phone.nextCheck(challenge(-1, 0));
+            phone.bootHash = release2;
+            phone.osPatchLevel = 202611;
+            verify(phone.message(), alice, true, list2);
+        });
+
         // the timing heuristic flags but never rejects
         final Profile2Fixture quick = new Profile2Fixture();
         quick.challenge = challenge(bob, 0);
@@ -154,6 +173,7 @@ public final class Profile2Test {
 
         releaseListStore();
         challengeLimit();
+        enrollLink();
         System.out.println("Profile 2 server tests: " + passed + " checks passed (software fixtures, no hardware claim).");
     }
 
@@ -270,6 +290,19 @@ public final class Profile2Test {
         return (String) value;
     }
 
+    private static boolean retireSuggested(final Profile2Fixture fixture) throws Exception {
+        final SQLiteConnection conn = AttestationServer.getLocalAttestationConn();
+        final SQLiteStatement select = conn.prepare("SELECT " + AttestationServer.RETIRE_SUGGESTED
+                + " FROM Devices WHERE fingerprint = ?2");
+        try {
+            select.bind(1, System.currentTimeMillis());
+            select.bind(2, fingerprint(fixture));
+            return select.step() && select.columnInt(0) == 1;
+        } finally {
+            select.dispose();
+        }
+    }
+
     private static Object query(final String sql, final byte[] fingerprint) throws Exception {
         final SQLiteConnection conn = AttestationServer.getLocalAttestationConn();
         final SQLiteStatement select = conn.prepare(sql);
@@ -294,6 +327,10 @@ public final class Profile2Test {
         } finally {
             update.dispose();
         }
+    }
+
+    private static void setLastVerified(final Profile2Fixture fixture, final long time) throws Exception {
+        exec("UPDATE Devices SET verifiedTimeLast = ? WHERE fingerprint = ?", time, fingerprint(fixture));
     }
 
     private static void clearFailure(final Profile2Fixture fixture) throws Exception {
@@ -367,5 +404,18 @@ public final class Profile2Test {
             require(AttestationServer.allowAccountChallenge(userId), "challenge within the limit");
         }
         require(!AttestationServer.allowAccountChallenge(userId), "challenge over the limit refused");
+    }
+
+    private static void enrollLink() {
+        final byte[] key = new byte[32];
+        key[0] = (byte) 0xfb;
+        final String link = AttestationServer.enrollLink(7, key, 21600);
+        require(link.startsWith("intent://enroll?account=")
+                && link.endsWith("#Intent;scheme=diamaneos-auditor;package=de.diamaneos.auditor;end"),
+                "link restricted to Auditor");
+        final String account = URLDecoder.decode(link.substring("intent://enroll?account=".length(),
+                link.indexOf('#')), StandardCharsets.UTF_8);
+        require(account.equals(AttestationServer.DOMAIN + " 7 " + BaseEncoding.base64().encode(key) + " 21600"),
+                "link carries the QR code data");
     }
 }

@@ -20,6 +20,8 @@ const configuration = document.getElementById("configuration");
 const devices = document.getElementById("devices");
 const qr = document.getElementById("qr");
 const rotate = document.getElementById("rotate");
+const addThisPhone = document.getElementById("add_this_phone");
+const addThisPhoneHint = document.getElementById("add_this_phone_hint");
 const profile2Label = "First pairing not verified by hardware";
 const accountContent = document.getElementById("account_content");
 
@@ -162,7 +164,30 @@ function oemUnlockAllowedString(oemUnlockAllowed2) {
     throw new Error("Invalid oem unlock allowed value");
 }
 
+// The account page opens Auditor on the phone itself with the same data as the QR code.
+function reloadEnrollLink() {
+    addThisPhone.hidden = true;
+    addThisPhoneHint.hidden = true;
+    if (!/Android/.test(navigator.userAgent)) {
+        addThisPhoneHint.hidden = false;
+        return;
+    }
+    post("/api/enroll-link").then(response => {
+        if (!response.ok) {
+            return Promise.reject(new Error(response.status));
+        }
+        return response.json();
+    }).then(result => {
+        addThisPhone.onclick = () => {
+            location.href = result.link;
+        };
         addThisPhone.innerText = "Add this phone to account number " + result.userId;
+        addThisPhone.hidden = false;
+    }).catch(error => {
+        console.log(error);
+    });
+}
+
 function reloadQrCode() {
     qr.src = "/placeholder.gif";
     qr.alt = "";
@@ -191,6 +216,7 @@ function displayLogin(account) {
         configuration.email.value = account.email;
     }
     reloadQrCode();
+    reloadEnrollLink();
     fetchDevices();
 }
 
@@ -303,6 +329,9 @@ function fetchDevices() {
                 }
             }
 
+            if (device.retiredTime !== undefined && !devices.querySelector("h2.retired")) {
+                devices.appendChild(create("h2", "Retired devices", "retired"));
+            }
             const info = devices.appendChild(document.createElement("article"));
             const header = create("h2", null, "fingerprint");
             header.id = fingerprint;
@@ -332,7 +361,29 @@ function fetchDevices() {
                 }
             };
 
+            if (device.retiredTime !== undefined) {
+                appendLine(info, "Retired: " + new Date(device.retiredTime));
+            } else if (device.retireSuggested) {
+                info.appendChild(create("p", "This device stopped checking in after a newer device was added. " +
+                    "Was the old phone reset? Retire it."));
+                const retireButton = info.appendChild(create("button", "retire device"));
+                retireButton.onclick = event => {
                     if (confirm(`Retire the device ${fingerprint}? It stops raising alerts, and its record and history are kept until 90 days after its last successful check.`)) {
+                        event.target.disabled = true;
+                        post("/api/retire-device", JSON.stringify({"fingerprint": device.fingerprint})).then(response => {
+                            if (!response.ok) {
+                                return Promise.reject(new Error(response.status));
+                            }
+                            devices.innerText = null;
+                            fetchDevices();
+                        }).catch(error => {
+                            event.target.disabled = false;
+                            console.log(error);
+                        });
+                    }
+                };
+            }
+
             if (device.pending) {
                 info.appendChild(create("p", "Waiting for your approval. Approve this phone only if you added it " +
                     "yourself. Until then it is not monitored and raises no alerts."));

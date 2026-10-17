@@ -104,8 +104,16 @@ class AttestationServer {
             .maximumSize(100000)
             .build();
 
+    // A device that stopped checking in for two intervals while a newer device on the same account
+    // started after it. The account holder is asked whether the old phone was reset.
+    static final String RETIRE_SUGGESTED = """
             (Devices.retiredTime IS NULL AND Devices.deletionTime IS NULL AND Devices.pending = 0
+            AND Devices.verifiedTimeLast < ?1 - (SELECT verifyInterval FROM Accounts
+                WHERE Accounts.userId = Devices.userId) * 2000
+            AND EXISTS (SELECT 1 FROM Devices AS Newer WHERE Newer.userId = Devices.userId
                 AND Newer.fingerprint != Devices.fingerprint AND Newer.retiredTime IS NULL AND Newer.deletionTime IS NULL AND Newer.pending = 0
+                AND Newer.verifiedTimeFirst > Devices.verifiedTimeLast))""";
+
     // Profile 2 phones the account holder has not approved yet, limited so a leaked subscribe key
     // cannot flood the account.
     static final int MAX_PENDING_DEVICES = 3;
@@ -221,7 +229,8 @@ class AttestationServer {
                 deletionTime INTEGER,
                 trustProfile INTEGER NOT NULL DEFAULT 1 CHECK (trustProfile in (1, 2)),
                 reviewFlags TEXT,
-                failureReason TEXT
+                failureReason TEXT,
+                retiredTime INTEGER,
                 retireSuggestedTime INTEGER,
                 pending INTEGER NOT NULL DEFAULT 0 CHECK (pending in (0, 1)),
                 pendingNoticeTime INTEGER
@@ -991,7 +1000,6 @@ class AttestationServer {
                 logger.info("Migrated to schema version: " + userVersion);
             }
 
-            // trust profile 2, review flags and failure reasons
             // trust profile 2, review flags, failure reasons, retired and pending devices
             targetUserVersion = 18;
             if (userVersion < targetUserVersion) {
@@ -1000,6 +1008,8 @@ class AttestationServer {
                     {"trustProfile", "INTEGER NOT NULL DEFAULT 1 CHECK (trustProfile in (1, 2))"},
                     {"reviewFlags", "TEXT"},
                     {"failureReason", "TEXT"},
+                    {"retiredTime", "INTEGER"},
+                    {"retireSuggestedTime", "INTEGER"},
                     {"pending", "INTEGER NOT NULL DEFAULT 0 CHECK (pending in (0, 1))"},
                     {"pendingNoticeTime", "INTEGER"},
                 };
@@ -1059,8 +1069,10 @@ class AttestationServer {
             server.createContext("/api/account.png", new AccountQrHandler());
             server.createContext("/api/configuration", new ConfigurationHandler());
             server.createContext("/api/delete-device", new DeleteDeviceHandler());
+            server.createContext("/api/retire-device", new RetireDeviceHandler());
             server.createContext("/api/approve-device", new PendingDeviceHandler(true));
             server.createContext("/api/reject-device", new PendingDeviceHandler(false));
+            server.createContext("/api/enroll-link", new EnrollLinkHandler());
             server.createContext("/releases.json", new ReleaseListHandler());
             server.createContext("/api/devices.json", new DevicesHandler());
             server.createContext("/api/attestation-history.json", new AttestationHistoryHandler());
@@ -1801,6 +1813,57 @@ class AttestationServer {
         }
     }
 
+    private static class RetireDeviceHandler extends PostHandler {
+        @Override
+        public void handlePost(final HttpExchange exchange) throws IOException, SQLiteException {
+            final String fingerprint;
+            try (final JsonReader reader = Json.createReader(exchange.getRequestBody())) {
+                final JsonObject object = reader.readObject();
+                fingerprint = object.getString("fingerprint");
+            } catch (final ClassCastException | JsonException | NullPointerException e) {
+                logger.log(Level.WARNING, "invalid request", e);
+                exchange.sendResponseHeaders(400, -1);
+                return;
+            }
+
+            final Account account = verifySession(exchange, false);
+            if (account == null) {
+                return;
+            }
+
+            final byte[] fingerprintBytes;
+            try {
+                fingerprintBytes = BaseEncoding.base16().decode(fingerprint);
+            } catch (final IllegalArgumentException e) {
+                exchange.sendResponseHeaders(400, -1);
+                return;
+            }
+            if (!retireDevice(account.userId, fingerprintBytes)) {
+                exchange.sendResponseHeaders(400, -1);
+                return;
+            }
+            exchange.sendResponseHeaders(200, -1);
+        }
+    }
+
+    // Archives a device of this account with its history. It stops raising alerts and its
+    // checks are refused from then on.
+    static boolean retireDevice(final long userId, final byte[] fingerprint) throws SQLiteException {
+        final SQLiteConnection conn = getLocalAttestationConn();
+        final SQLiteStatement update = conn.prepare("""
+                UPDATE Devices SET retiredTime = ? WHERE userId = ? AND fingerprint = ?
+                AND retiredTime IS NULL AND deletionTime IS NULL""");
+        try {
+            update.bind(1, System.currentTimeMillis());
+            update.bind(2, userId);
+            update.bind(3, fingerprint);
+            update.step();
+        } finally {
+            update.dispose();
+        }
+        return conn.getChanges() == 1;
+    }
+
     // A new profile 2 phone needs the account holder's approval before it is monitored. A rejected
     // one is removed with its history.
     private static class PendingDeviceHandler extends PostHandler {
@@ -1861,7 +1924,34 @@ class AttestationServer {
         return conn.getChanges() == 1;
     }
 
+    // The same account data as the QR code, as a link only Auditor can receive.
+    static String enrollLink(final long userId, final byte[] subscribeKey, final int verifyInterval) {
+        final String account = DOMAIN + " " + userId + " " + BaseEncoding.base64().encode(subscribeKey)
+                + " " + verifyInterval;
+        return "intent://enroll?account=" + java.net.URLEncoder.encode(account, StandardCharsets.UTF_8)
+                .replace("+", "%20")
+                + "#Intent;scheme=diamaneos-auditor;package=de.diamaneos.auditor;end";
+    }
+
+    private static class EnrollLinkHandler extends PostHandler {
+        @Override
+        public void handlePost(final HttpExchange exchange) throws IOException, SQLiteException {
+            final Account account = verifySession(exchange, false);
+            if (account == null) {
+                return;
+            }
+            final JsonObjectBuilder result = Json.createObjectBuilder();
+            result.add("link", enrollLink(account.userId, account.subscribeKey, account.verifyInterval));
             result.add("userId", account.userId);
+            exchange.getResponseHeaders().set("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, 0);
+            try (final OutputStream output = exchange.getResponseBody();
+                    final JsonWriter writer = Json.createWriter(output)) {
+                writer.write(result.build());
+            }
+        }
+    }
+
     // Serves the signed release list this server verified and accepted.
     private static class ReleaseListHandler implements HttpHandler {
         @Override
@@ -1933,13 +2023,15 @@ class AttestationServer {
                     trustProfile,
                     reviewFlags,
                     failureTimeLast,
-                    failureReason
-                FROM Devices WHERE userId is ? AND deletionTime IS NULL
-                ORDER BY verifiedTimeFirst""");
+                    failureReason,
+                    retiredTime,
                     %s,
                     pending
+                FROM Devices WHERE userId is ?2 AND deletionTime IS NULL
+                ORDER BY retiredTime IS NOT NULL, verifiedTimeFirst""".formatted(RETIRE_SUGGESTED));
         try {
-            select.bind(1, userId);
+            select.bind(1, System.currentTimeMillis());
+            select.bind(2, userId);
             while (select.step()) {
                 final JsonObjectBuilder device = Json.createObjectBuilder();
                 final byte[] fingerprint = select.columnBlob(0);
@@ -1995,7 +2087,10 @@ class AttestationServer {
                         device.add("failureReason", select.columnString(31));
                     }
                 }
-
+                if (!select.columnNull(32)) {
+                    device.add("retiredTime", select.columnLong(32));
+                }
+                device.add("retireSuggested", select.columnInt(33) != 0);
                 device.add("pending", select.columnInt(34) != 0);
                 if (!select.columnNull(4)) {
                     device.add("verifiedBootHash", select.columnString(4));

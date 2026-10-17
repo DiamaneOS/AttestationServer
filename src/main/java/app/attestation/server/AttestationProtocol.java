@@ -907,7 +907,8 @@ class AttestationProtocol {
                             pinnedAppVariant,
                             pinnedSecurityLevel,
                             userId,
-                            trustProfile
+                            trustProfile,
+                            retiredTime
                         FROM Devices WHERE fingerprint = ?""");
                 try {
                     st.bind(1, fingerprint);
@@ -929,6 +930,9 @@ class AttestationProtocol {
                             throw new GeneralSecurityException("wrong userId");
                         }
                         pinnedTrustProfile = st.columnInt(10);
+                        if (!st.columnNull(11)) {
+                            throw new GeneralSecurityException("device retired");
+                        }
                     } else {
                         throw new GeneralSecurityException(
                                 "Pairing data for this Auditee is missing. Cannot perform paired attestation.\n" +
