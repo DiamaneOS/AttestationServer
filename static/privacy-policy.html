@@ -23,15 +23,15 @@
 
     <h2>Purposes and legal bases</h2>
     <p>Connection data is processed to deliver responses and limit abuse. Account and device information supports requested integrity verification, account security and selected alerts. Article 6(1)(f) GDPR applies: legitimate interests in reliable, secure verification with data limited to these functions.</p>
-    <p>Remote verification is optional. The account and security information below is necessary to use it. Verification results describe device integrity; this service does not make decisions about people with legal or similarly significant effects.</p>
+    <p>Remote verification is optional. The account and security information below is necessary to use it. Verification results describe device integrity. This service does not make decisions about people with legal or similarly significant effects.</p>
 
     <h2>Information processed</h2>
     <ul>
       <li>Connections expose an IP address, request time, path and protocol headers. Request access logs and request-associated error logs are disabled. Temporary connection and request limits use memory.</li>
-      <li>Accounts store a username, salted password hash, enrollment credential, creation and login times, verification settings, optional alert email addresses and authentication sessions. Passwords are verified transiently; the database stores their hash, not their plaintext.</li>
+      <li>Accounts store a username, salted password hash, enrollment credential, creation and login times, verification settings, optional alert email addresses and authentication sessions. Passwords are verified transiently. The database stores their hash, not their plaintext.</li>
       <li>Devices store a pairing-key fingerprint, attestation certificates, verified-boot identity, software versions and patch levels, verification times and supplementary security-state flags.</li>
-      <li>Security-state flags include lock security, biometric enrollment, accessibility, device administration, debugging and other device protections. Biometric enrollment is a status flag; biometric samples and templates are not submitted.</li>
-      <li>Verification history records timestamps, verification strength, software and patch versions, verified-boot information and the submitted security-state flags. The pairing fingerprint identifies the verification key; it is not a biometric fingerprint.</li>
+      <li>Security-state flags include lock security, biometric enrollment, accessibility, device administration, debugging and other device protections. Biometric enrollment is a status flag. Biometric samples and templates are not submitted.</li>
+      <li>Verification history records timestamps, verification strength, software and patch versions, verified-boot information and the submitted security-state flags. The pairing fingerprint identifies the verification key. It is not a biometric fingerprint.</li>
       <li>Phones whose first pairing is not verified by hardware also store review flags from that pairing, such as an unusually fast response, and the reason for their latest failed check. These details stay with the device record. A phone retired after a reset keeps its record until 90 days after its last successful verification.</li>
     </ul>
     <p>The service does not use this information for advertising or cross-service user profiling. There is no sample-upload endpoint in this server. Local Auditor verification between devices does not send its results here.</p>
@@ -40,14 +40,14 @@
     <p>The account interface uses a necessary authentication cookie, restricted to this host, with Secure, HttpOnly and SameSite=Strict protections. Server-side sessions expire after 48 hours and can be ended by logout. The cookie is strictly necessary for the account you sign in to, so no consent is asked (Section 25(2) No. 2 TDDDG). The privacy page sets no cookie and runs no script.</p>
 
     <h2>Retention</h2>
-    <p>The database maintenance job removes expired sessions and applies the following rules. It runs after startup and then daily; removal takes place on the next successful maintenance run after the threshold.</p>
+    <p>The database maintenance job removes expired sessions and applies the following rules. It runs after startup and then daily. Removal takes place on the next successful maintenance run after the threshold.</p>
     <ul>
       <li>Devices marked for deletion: after seven days, including their associated verification history.</li>
       <li>Inactive devices: after 90 days without a successful verification.</li>
       <li>Verification-history entries: after 180 days.</li>
       <li>Accounts with no remaining device records: after 365 days without a login.</li>
     </ul>
-    <p>Deletion removes records from the live database. Requests to access or erase account data use the contact details above; account deletion is handled through that request process, rather than a self-service account-delete button.</p>
+    <p>Deletion removes records from the live database. Requests to access or erase account data use the contact details above. Account deletion is handled through that request process, rather than a self-service account-delete button.</p>
     <p>Operational journals use volatile storage with a one-day retention limit and are cleared on reboot. Application logging is restricted to critical failures.</p>
 
     <h2>Encrypted backups</h2>
@@ -66,7 +66,7 @@
     <h2>Your rights</h2>
     <p>You can request access, correction, erasure or restriction. Portability applies where its legal conditions are met. Necessary identity checks are proportionate to the data requested.</p>
     <p><strong>Right to object.</strong> Where processing relies on legitimate interests (Article 6(1)(f) GDPR), you can object to it at any time for reasons arising from your particular situation (Article 21 GDPR). Send the objection to the contact details above.</p>
-    <p>Requests receive a response within one month. Where complexity or the number of requests requires an extension, up to two additional months are allowed; you will be informed of the reason within the first month.</p>
+    <p>Requests receive a response within one month. Where complexity or the number of requests requires an extension, up to two additional months are allowed, and you will be informed of the reason within the first month.</p>
     <p>You can complain to a data-protection supervisory authority, including one where you live or work. Contact details above also apply to privacy enquiries. See the <a href="https://diamaneos.de/legal/#privacy" rel="noreferrer">website privacy policy</a> for the contact form and other DiamaneOS services.</p>
   </main>
 </body>
