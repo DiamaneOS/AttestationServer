@@ -32,6 +32,7 @@
       <li>Devices store a pairing-key fingerprint, attestation certificates, verified-boot identity, software versions and patch levels, verification times and supplementary security-state flags.</li>
       <li>Security-state flags include lock security, biometric enrollment, accessibility, device administration, debugging and other device protections. Biometric enrollment is a status flag; biometric samples and templates are not submitted.</li>
       <li>Verification history records timestamps, verification strength, software and patch versions, verified-boot information and the submitted security-state flags. The pairing fingerprint identifies the verification key; it is not a biometric fingerprint.</li>
+      <li>Phones whose first pairing is not verified by hardware also store review flags from that pairing, such as an unusually fast response, and the reason for their latest failed check. These details stay with the device record. A phone retired after a reset keeps its record until 90 days after its last successful verification.</li>
     </ul>
     <p>The service does not use this information for advertising or cross-service user profiling. There is no sample-upload endpoint in this server. Local Auditor verification between devices does not send its results here.</p>
 
