@@ -17,7 +17,7 @@ The build checks include `diamaneOSPolicyTest` and `profile2Test`. Dependencies 
 
 ## Deployment
 
-Use the [Debian adapters](https://github.com/DiamaneOS/infrastructure/tree/main/debian) for TLS, service isolation and encrypted state. The inherited website publisher is disabled. Nginx serves a separate publication tree and blocks the inherited donation, contact and signing-identity paths.
+Use the [Debian adapters](https://github.com/DiamaneOS/infrastructure/tree/main/debian) for TLS, service isolation and encrypted state. The inherited website publisher is disabled. Nginx serves a separate publication tree and blocks the inherited donation and signing-identity paths.
 
 `nginx/service-state.conf` controls public enrollment. Account creation and remote verification use the existing upstream APIs. State contains accounts, device pairing information, verification history and optional alert addresses.
 
