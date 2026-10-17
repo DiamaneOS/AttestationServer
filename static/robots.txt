@@ -1,2 +1,2 @@
 User-agent: *
-Sitemap: https://attestation.app/sitemap.xml
+Sitemap: https://attestation.diamaneos.de/sitemap.xml
