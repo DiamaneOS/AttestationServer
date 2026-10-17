@@ -177,6 +177,7 @@ final class Profile2Fixture {
                         .add(Base64.getEncoder().encodeToString(LIST_SIGNER.getPublic().getEncoded())))
                 .add("devices", Json.createArrayBuilder().add(Json.createObjectBuilder()
                         .add("id", "FP6")
+                        .add("buildDevice", "FP6")
                         .add("name", "Fairphone 6")
                         .add("osName", "DiamaneOS")
                         .add("verifiedBootKey", BaseEncoding.base16().encode(AVB_KEY))

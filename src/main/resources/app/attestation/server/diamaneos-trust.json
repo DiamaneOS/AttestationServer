@@ -6,6 +6,7 @@
   "devices": [
     {
       "id": "FP6",
+      "buildDevice": "FP6",
       "name": "Fairphone 6",
       "osName": "DiamaneOS",
       "verifiedBootKey": "5C4C94BA54E9F4FE81DCFD77E9B919204F0A493593A2677B50498CBCB6CD8F8D",

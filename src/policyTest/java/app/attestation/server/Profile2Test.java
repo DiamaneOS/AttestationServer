@@ -49,6 +49,12 @@ public final class Profile2Test {
         require(text(phone, "reviewFlags").isEmpty(), "well-formed chain is not flagged");
         rejected("challenge not pending", () -> verify(first, alice, false, list1));
 
+        // a new profile 2 phone waits for the account holder
+        require(column(phone, "pending") == 1, "new profile 2 phone pending");
+        require(!AttestationServer.approveDevice(bob, fingerprint(phone)), "other account cannot approve it");
+        require(AttestationServer.approveDevice(alice, fingerprint(phone)), "account holder approves it");
+        require(column(phone, "pending") == 0, "approved phone is monitored");
+
         firstPairingRejected("challenge expired", alice, list1, f -> {}, 31000);
         firstPairingRejected("not issued to this account", bob, list1, f -> {}, 1000, alice);
         firstPairingRejected("not issued to this account", alice, list1, f -> {}, 1000, -1);
@@ -64,9 +70,8 @@ public final class Profile2Test {
         firstPairingRejected("not locked", alice, list1, f -> f.locked = false, 1000);
         firstPairingRejected("invalid verified boot key", alice, list1,
                 f -> f.bootKey = Profile2Fixture.sha256("Pixel key"), 1000);
-        // a list from an unknown signer is never loaded, so nothing matches
-        firstPairingRejected("not an official release", alice, list(1, Profile2Fixture.keyPair(),
-                Profile2Fixture.release(release1, 202610)), f -> {}, 1000);
+        firstPairingRejected("only trusted by other Auditor debug builds", alice, list1,
+                f -> f.packageName = "de.diamaneos.auditor.debug", 1000);
 
         // later checks need no bound challenge or time limit, only the pinned keys and the list
         phone.nextCheck(challenge(-1, 600000));
@@ -92,6 +97,31 @@ public final class Profile2Test {
         rejected("OS patch level downgrade", () -> verify(phone.message(), alice, true, list2));
         require(column(phone, "failureTimeLast") > 0, "downgrade alerts");
 
+        // failures found after the report is authenticated alert, a replayed report does not
+        phone.bootHash = release2;
+        phone.osPatchLevel = 202611;
+        phone.nextCheck(challenge(-1, 0));
+        final byte[] accepted = phone.message();
+        verify(accepted, alice, true, list2);
+        clearFailure(phone);
+        phone.nextCheck(challenge(-1, 0));
+        phone.locked = false;
+        rejected("not locked", () -> verify(phone.message(), alice, true, list2));
+        require(column(phone, "failureTimeLast") > 0, "unlocked phone alerts");
+        phone.locked = true;
+        clearFailure(phone);
+        rejected("challenge not pending", () -> verify(accepted, alice, true, list2));
+        require(column(phone, "failureTimeLast") == 0, "replayed report records nothing");
+
+        // without a loaded release list the server is at fault, so nothing is recorded
+        phone.nextCheck(challenge(-1, 0));
+        unavailable(phone.message(), alice, true);
+        require(column(phone, "failureTimeLast") == 0, "missing list records nothing");
+        final Profile2Fixture unlisted = new Profile2Fixture();
+        unlisted.challenge = challenge(alice, 1000);
+        unavailable(unlisted.message(), alice, false);
+        require(!exists(unlisted), "missing list stores no pairing");
+
         // a different phone cannot take over the pinned record
         final Profile2Fixture other = new Profile2Fixture();
         other.challenge = challenge(alice, 1000);
@@ -107,6 +137,8 @@ public final class Profile2Test {
         reset.challenge = challenge(alice, 1000);
         setLastVerified(phone, System.currentTimeMillis() - 13L * 60 * 60 * 1000);
         verify(reset.message(), alice, false, list2);
+        require(!retireSuggested(phone), "a pending phone does not replace the old one");
+        require(AttestationServer.approveDevice(alice, fingerprint(reset)), "new phone approved");
         require(retireSuggested(phone) && !retireSuggested(reset), "old phone suggested for retiring");
         require(!AttestationServer.retireDevice(bob, fingerprint(phone)), "other account cannot retire it");
         require(AttestationServer.retireDevice(alice, fingerprint(phone)), "account holder retires it");
@@ -123,6 +155,21 @@ public final class Profile2Test {
         quick.challenge = challenge(bob, 0);
         verify(quick.message(), bob, false, list1);
         require(text(quick, "reviewFlags").equals("fast-response"), "fast response flagged");
+
+        // a leaked subscribe key cannot flood an account with pending phones
+        final Profile2Fixture second = new Profile2Fixture();
+        second.challenge = challenge(bob, 1000);
+        verify(second.message(), bob, false, list1);
+        final Profile2Fixture third = new Profile2Fixture();
+        third.challenge = challenge(bob, 1000);
+        verify(third.message(), bob, false, list1);
+        firstPairingRejected("too many phones waiting", bob, list1, f -> {}, 1000);
+        require(AttestationServer.rejectDevice(bob, fingerprint(third)), "account holder rejects a phone");
+        require(!exists(third), "rejected phone removed");
+        final Profile2Fixture fourth = new Profile2Fixture();
+        fourth.challenge = challenge(bob, 1000);
+        verify(fourth.message(), bob, false, list1);
+        require(!AttestationServer.rejectDevice(bob, fingerprint(phone)), "approved phones cannot be rejected");
 
         releaseListStore();
         challengeLimit();
@@ -156,6 +203,17 @@ public final class Profile2Test {
             final ReleaseList list) throws Exception {
         AttestationProtocol.verifySerialized(message, challenges, userId, paired, trust, list);
         passed++;
+    }
+
+    private static void unavailable(final byte[] message, final long userId, final boolean paired)
+            throws Exception {
+        try {
+            AttestationProtocol.verifySerialized(message, challenges, userId, paired, trust, null);
+        } catch (final Profile2.ReleaseListUnavailableException e) {
+            passed++;
+            return;
+        }
+        throw new AssertionError("expected an unavailable release list");
     }
 
     private static void rejected(final String reason, final Action action) throws Exception {
@@ -321,6 +379,23 @@ public final class Profile2Test {
         Files.setLastModifiedTime(file, java.nio.file.attribute.FileTime.fromMillis(System.currentTimeMillis() + 10000));
         ReleaseListStore.refresh();
         require(ReleaseListStore.current().sequence == 5, "list from an unknown signer refused");
+
+        // a failed load is retried even when the file keeps its time and size
+        final byte[] valid = Profile2Fixture.releaseList(Profile2Fixture.LIST_SIGNER, 6,
+                Profile2Fixture.release(release, 202610));
+        final byte[] broken = valid.clone();
+        final int middle = new String(valid, StandardCharsets.UTF_8).indexOf("\"payload\":\"") + 20;
+        broken[middle] = (byte) (broken[middle] == 'A' ? 'B' : 'A');
+        final java.nio.file.attribute.FileTime time =
+                java.nio.file.attribute.FileTime.fromMillis(System.currentTimeMillis() + 20000);
+        Files.write(file, broken);
+        Files.setLastModifiedTime(file, time);
+        ReleaseListStore.refresh();
+        require(ReleaseListStore.current().sequence == 5, "broken list refused");
+        Files.write(file, valid);
+        Files.setLastModifiedTime(file, time);
+        ReleaseListStore.refresh();
+        require(ReleaseListStore.current().sequence == 6, "valid list with the same time and size loaded");
     }
 
     private static void challengeLimit() {
