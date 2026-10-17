@@ -68,6 +68,25 @@ val diamaneOSPolicyTest = tasks.register<JavaExec>("diamaneOSPolicyTest") {
     })
 }
 
+// Needs the SQLite native library for the host, by default the bundled Linux x86-64 one.
+val profile2Test = tasks.register<JavaExec>("profile2Test") {
+    dependsOn(tasks.named(policyTests.classesTaskName))
+    classpath = policyTests.runtimeClasspath
+    mainClass.set("app.attestation.server.Profile2Test")
+    javaLauncher.set(javaToolchains.launcherFor {
+        languageVersion.set(JavaLanguageVersion.of(25))
+    })
+    val dir = layout.buildDirectory.dir("profile2Test").get().asFile
+    workingDir = dir
+    systemProperty("sqlite4java.library.path", providers.gradleProperty("sqliteLibraryPath")
+            .getOrElse(file("libs/sqlite4java-prebuilt").absolutePath))
+    doFirst {
+        dir.deleteRecursively()
+        dir.mkdirs()
+    }
+}
+
 tasks.check {
     dependsOn(diamaneOSPolicyTest)
+    dependsOn(profile2Test)
 }

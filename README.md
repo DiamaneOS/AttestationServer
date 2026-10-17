@@ -11,7 +11,9 @@ git submodule update --init --recursive
 ./gradlew build
 ```
 
-The build checks include `diamaneOSPolicyTest`. Dependencies are authenticated through [gradle/verification-metadata.xml](gradle/verification-metadata.xml).
+The build checks include `diamaneOSPolicyTest` and `profile2Test`. Dependencies are authenticated through [gradle/verification-metadata.xml](gradle/verification-metadata.xml).
+
+`profile2Test` uses the bundled Linux x86-64 SQLite library. On other hosts, pass a matching sqlite4java library directory with `-PsqliteLibraryPath=<dir>`.
 
 ## Deployment
 
@@ -25,8 +27,9 @@ SMTP configuration is stored in the database. Remote delivery uses SMTP over TLS
 
 The pairing QR code contains `<domain> <userId> <subscribeKey> <verifyInterval>`. Treat the subscription key as opaque data.
 
-- `POST /auditor/challenge` returns a single-use challenge.
+- `POST /auditor/challenge` returns a single-use challenge. With `Authorization: Auditor <userId> <subscribeKey>` the challenge is bound to that account, a limited number per hour.
 - `POST /auditor/verify` verifies the attestation and returns its verification interval.
 - Unpaired verification uses `Authorization: Auditor <userId> <subscribeKey>`. Paired verification uses `Authorization: Auditor <userId>`.
+- `GET /releases.json` returns the signed release list this server accepted.
 
 Trust requirements and source provenance are described in [DOWNSTREAM.md](DOWNSTREAM.md).
