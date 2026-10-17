@@ -1,0 +1,16 @@
+{
+  "format": "diamaneos-attestation-trust",
+  "version": 1,
+  "auditorReleaseSigner": "427BFD360586B829475F37ABFFD2548D93DB3618E45C994DE416469EF04BC2EC",
+  "releaseListSigners": ["MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEobfg2nj0QgbK2ff+xoPCgfcG6oHlp9EaBtPRjxfE5kaPLpX8pSTbLMV/A/yUapD2Jmu7RuG0enZW5Wfc5BaFUQ=="],
+  "devices": [
+    {
+      "id": "FP6",
+      "buildDevice": "FP6",
+      "name": "Fairphone 6",
+      "osName": "DiamaneOS",
+      "verifiedBootKey": "5C4C94BA54E9F4FE81DCFD77E9B919204F0A493593A2677B50498CBCB6CD8F8D",
+      "securityLevel": "TRUSTED_ENVIRONMENT"
+    }
+  ]
+}

@@ -20,12 +20,20 @@ public final class DiamaneOSPolicyTest {
         require(AttestationProtocol.fingerprintsStock.get("0".repeat(64)) == null &&
                 AttestationProtocol.fingerprintsNonStock.get("0".repeat(64)) == null,
                 "unknown verified-boot keys must not receive an FP6 exception");
-        require(AttestationProtocol.classifyReleaseSignature(
-                "990E04F0864B19F14F84E0E432F7A393F297AB105A22C1E1B10B442A4A62C42C") == 3,
+        final TrustConfig trust = TrustConfig.get();
+        require(trust.releaseListSigners.keySet().equals(java.util.Set.of(
+                "0B0A4D2CD3680FF4F3993CA8A61CDA93417680F5151090154EDCD52655C7E4AB")),
+                "release lists must be signed by the offline policy key");
+        require(AttestationProtocol.classifyRelease("app.attestation.auditor",
+                "990E04F0864B19F14F84E0E432F7A393F297AB105A22C1E1B10B442A4A62C42C", trust) == 3,
                 "upstream signer must retain its distinct pairing variant");
-        for (final String invalid : new String[] {"", "0".repeat(64), "0".repeat(62), "0".repeat(66)}) {
+        require(AttestationProtocol.classifyRelease("de.diamaneos.auditor", trust.auditorReleaseSigner, trust) == 0,
+                "DiamaneOS Auditor must use the release variant");
+        for (final String[] invalid : new String[][] {{"de.diamaneos.auditor", ""},
+                {"de.diamaneos.auditor", "0".repeat(64)}, {"de.diamaneos.auditor", "0".repeat(62)},
+                {"app.attestation.auditor", trust.auditorReleaseSigner}}) {
             try {
-                AttestationProtocol.classifyReleaseSignature(invalid);
+                AttestationProtocol.classifyRelease(invalid[0], invalid[1], trust);
                 throw new AssertionError("unconfigured or unknown release signer accepted");
             } catch (final GeneralSecurityException expected) {
                 // Rejection is the security boundary under test.

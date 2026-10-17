@@ -20,6 +20,7 @@ const configuration = document.getElementById("configuration");
 const devices = document.getElementById("devices");
 const qr = document.getElementById("qr");
 const rotate = document.getElementById("rotate");
+const profile2Label = "First pairing not verified by hardware";
 const accountContent = document.getElementById("account_content");
 
 const deviceAdminStrings = new Map([
@@ -161,6 +162,7 @@ function oemUnlockAllowedString(oemUnlockAllowed2) {
     throw new Error("Invalid oem unlock allowed value");
 }
 
+        addThisPhone.innerText = "Add this phone to account number " + result.userId;
 function reloadQrCode() {
     qr.src = "/placeholder.gif";
     qr.alt = "";
@@ -331,6 +333,40 @@ function fetchDevices() {
             };
 
                     if (confirm(`Retire the device ${fingerprint}? It stops raising alerts, and its record and history are kept until 90 days after its last successful check.`)) {
+            if (device.pending) {
+                info.appendChild(create("p", "Waiting for your approval. Approve this phone only if you added it " +
+                    "yourself. Until then it is not monitored and raises no alerts."));
+                for (const [label, resource] of [["approve device", "/api/approve-device"], ["reject device", "/api/reject-device"]]) {
+                    const button = info.appendChild(create("button", label));
+                    button.onclick = event => {
+                        if (confirm(`Are you sure you want to ${label.split(" ")[0]} the device ${fingerprint}?`)) {
+                            event.target.disabled = true;
+                            post(resource, JSON.stringify({"fingerprint": device.fingerprint})).then(response => {
+                                if (!response.ok) {
+                                    return Promise.reject(new Error(response.status));
+                                }
+                                devices.innerText = null;
+                                fetchDevices();
+                            }).catch(error => {
+                                event.target.disabled = false;
+                                console.log(error);
+                            });
+                        }
+                    };
+                }
+            }
+
+            if (device.trustProfile == 2) {
+                info.appendChild(create("p", null)).appendChild(create("strong", profile2Label));
+                if (device.reviewFlags !== undefined) {
+                    appendLine(info, "Flagged for review: " + device.reviewFlags);
+                }
+            }
+            if (device.failureTimeLast !== undefined) {
+                appendLine(info, "Last failed check: " + new Date(device.failureTimeLast) +
+                    (device.failureReason !== undefined ? " (" + device.failureReason + ")" : ""));
+            }
+
             info.appendChild(create("h3", "Hardware verified information:"));
             info.appendChild(document.createTextNode("Pairing identity (hash of pinned hardware-backed key): "));
             info.appendChild(create("span", fingerprint, "fingerprint"));
@@ -673,6 +709,7 @@ rotate.onclick = () => {
             }
             rotate.disabled = false;
             reloadQrCode();
+            reloadEnrollLink();
         }).catch(error => {
             rotate.disabled = false;
             console.log(error);
@@ -704,6 +741,7 @@ configuration.onsubmit = event => {
         }
         configuration.submit.disabled = false;
         reloadQrCode();
+        reloadEnrollLink();
     }).catch(error => {
         configuration.submit.disabled = false;
         console.log(error);
