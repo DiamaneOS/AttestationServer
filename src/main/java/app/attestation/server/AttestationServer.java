@@ -107,12 +107,16 @@ class AttestationServer {
     // A device that stopped checking in for two intervals while a newer device on the same account
     // started after it. The account holder is asked whether the old phone was reset.
     static final String RETIRE_SUGGESTED = """
-            (Devices.retiredTime IS NULL AND Devices.deletionTime IS NULL
+            (Devices.retiredTime IS NULL AND Devices.deletionTime IS NULL AND Devices.pending = 0
             AND Devices.verifiedTimeLast < ?1 - (SELECT verifyInterval FROM Accounts
                 WHERE Accounts.userId = Devices.userId) * 2000
             AND EXISTS (SELECT 1 FROM Devices AS Newer WHERE Newer.userId = Devices.userId
-                AND Newer.retiredTime IS NULL AND Newer.deletionTime IS NULL
+                AND Newer.fingerprint != Devices.fingerprint AND Newer.retiredTime IS NULL AND Newer.deletionTime IS NULL AND Newer.pending = 0
                 AND Newer.verifiedTimeFirst > Devices.verifiedTimeLast))""";
+
+    // Profile 2 phones the account holder has not approved yet, limited so a leaked subscribe key
+    // cannot flood the account.
+    static final int MAX_PENDING_DEVICES = 3;
 
     static SQLiteConnection open(final File db) throws SQLiteException {
         final SQLiteConnection conn = new SQLiteConnection(db);
@@ -227,7 +231,9 @@ class AttestationServer {
                 reviewFlags TEXT,
                 failureReason TEXT,
                 retiredTime INTEGER,
-                retireSuggestedTime INTEGER
+                retireSuggestedTime INTEGER,
+                pending INTEGER NOT NULL DEFAULT 0 CHECK (pending in (0, 1)),
+                pendingNoticeTime INTEGER
             ) STRICT;
 
             CREATE TABLE IF NOT EXISTS Attestations (
@@ -994,7 +1000,7 @@ class AttestationServer {
                 logger.info("Migrated to schema version: " + userVersion);
             }
 
-            // trust profile 2, review flags, failure reasons and retired devices
+            // trust profile 2, review flags, failure reasons, retired and pending devices
             targetUserVersion = 18;
             if (userVersion < targetUserVersion) {
                 conn.exec("BEGIN IMMEDIATE TRANSACTION");
@@ -1004,6 +1010,8 @@ class AttestationServer {
                     {"failureReason", "TEXT"},
                     {"retiredTime", "INTEGER"},
                     {"retireSuggestedTime", "INTEGER"},
+                    {"pending", "INTEGER NOT NULL DEFAULT 0 CHECK (pending in (0, 1))"},
+                    {"pendingNoticeTime", "INTEGER"},
                 };
                 for (final String[] column : columns) {
                     if (!hasColumn(conn, "Devices", column[0])) {
@@ -1062,6 +1070,8 @@ class AttestationServer {
             server.createContext("/api/configuration", new ConfigurationHandler());
             server.createContext("/api/delete-device", new DeleteDeviceHandler());
             server.createContext("/api/retire-device", new RetireDeviceHandler());
+            server.createContext("/api/approve-device", new PendingDeviceHandler(true));
+            server.createContext("/api/reject-device", new PendingDeviceHandler(false));
             server.createContext("/api/enroll-link", new EnrollLinkHandler());
             server.createContext("/releases.json", new ReleaseListHandler());
             server.createContext("/api/devices.json", new DevicesHandler());
@@ -1854,6 +1864,66 @@ class AttestationServer {
         return conn.getChanges() == 1;
     }
 
+    // A new profile 2 phone needs the account holder's approval before it is monitored. A rejected
+    // one is removed with its history.
+    private static class PendingDeviceHandler extends PostHandler {
+        private final boolean approve;
+
+        PendingDeviceHandler(final boolean approve) {
+            this.approve = approve;
+        }
+
+        @Override
+        public void handlePost(final HttpExchange exchange) throws IOException, SQLiteException {
+            final byte[] fingerprint;
+            try (final JsonReader reader = Json.createReader(exchange.getRequestBody())) {
+                fingerprint = BaseEncoding.base16().decode(reader.readObject().getString("fingerprint"));
+            } catch (final ClassCastException | JsonException | NullPointerException | IllegalArgumentException e) {
+                logger.log(Level.WARNING, "invalid request", e);
+                exchange.sendResponseHeaders(400, -1);
+                return;
+            }
+
+            final Account account = verifySession(exchange, false);
+            if (account == null) {
+                return;
+            }
+
+            final boolean changed = approve ? approveDevice(account.userId, fingerprint)
+                    : rejectDevice(account.userId, fingerprint);
+            exchange.sendResponseHeaders(changed ? 200 : 400, -1);
+        }
+    }
+
+    static boolean approveDevice(final long userId, final byte[] fingerprint) throws SQLiteException {
+        final SQLiteConnection conn = getLocalAttestationConn();
+        final SQLiteStatement update = conn.prepare("""
+                UPDATE Devices SET pending = 0 WHERE userId = ? AND fingerprint = ? AND pending = 1
+                AND deletionTime IS NULL""");
+        try {
+            update.bind(1, userId);
+            update.bind(2, fingerprint);
+            update.step();
+        } finally {
+            update.dispose();
+        }
+        return conn.getChanges() == 1;
+    }
+
+    static boolean rejectDevice(final long userId, final byte[] fingerprint) throws SQLiteException {
+        final SQLiteConnection conn = getLocalAttestationConn();
+        final SQLiteStatement delete = conn.prepare(
+                "DELETE FROM Devices WHERE userId = ? AND fingerprint = ? AND pending = 1");
+        try {
+            delete.bind(1, userId);
+            delete.bind(2, fingerprint);
+            delete.step();
+        } finally {
+            delete.dispose();
+        }
+        return conn.getChanges() == 1;
+    }
+
     // The same account data as the QR code, as a link only Auditor can receive.
     static String enrollLink(final long userId, final byte[] subscribeKey, final int verifyInterval) {
         final String account = DOMAIN + " " + userId + " " + BaseEncoding.base64().encode(subscribeKey)
@@ -1872,6 +1942,7 @@ class AttestationServer {
             }
             final JsonObjectBuilder result = Json.createObjectBuilder();
             result.add("link", enrollLink(account.userId, account.subscribeKey, account.verifyInterval));
+            result.add("userId", account.userId);
             exchange.getResponseHeaders().set("Content-Type", "application/json");
             exchange.sendResponseHeaders(200, 0);
             try (final OutputStream output = exchange.getResponseBody();
@@ -1954,7 +2025,8 @@ class AttestationServer {
                     failureTimeLast,
                     failureReason,
                     retiredTime,
-                    %s
+                    %s,
+                    pending
                 FROM Devices WHERE userId is ?2 AND deletionTime IS NULL
                 ORDER BY retiredTime IS NOT NULL, verifiedTimeFirst""".formatted(RETIRE_SUGGESTED));
         try {
@@ -2019,6 +2091,7 @@ class AttestationServer {
                     device.add("retiredTime", select.columnLong(32));
                 }
                 device.add("retireSuggested", select.columnInt(33) != 0);
+                device.add("pending", select.columnInt(34) != 0);
                 if (!select.columnNull(4)) {
                     device.add("verifiedBootHash", select.columnString(4));
                 }
@@ -2350,6 +2423,10 @@ class AttestationServer {
             ReleaseListStore.refresh();
             try {
                 AttestationProtocol.verifySerialized(attestationResult, pendingChallenges, userId, subscribeKey == null);
+            } catch (final Profile2.ReleaseListUnavailableException e) {
+                logger.log(Level.SEVERE, "no release list loaded", e);
+                exchange.sendResponseHeaders(503, -1);
+                return;
             } catch (final BufferUnderflowException | NegativeArraySizeException |
                     DataFormatException | GeneralSecurityException e) {
                 logger.log(Level.WARNING, "invalid request", e);

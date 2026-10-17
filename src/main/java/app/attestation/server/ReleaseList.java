@@ -19,6 +19,8 @@ final class ReleaseList {
     static final String FORMAT = "diamaneos-attestation-releases";
     static final String PAYLOAD_FORMAT = "diamaneos-attestation-releases-payload";
     static final int MAX_SIZE = 1024 * 1024;
+    // the payload nests five levels, deeper input is refused before parsing
+    private static final int MAX_DEPTH = 8;
     private static final String ALGORITHM = "ECDSA_P256_SHA256";
     private static final Pattern SHA256_HEX = Pattern.compile("[0-9A-F]{64}");
 
@@ -55,16 +57,43 @@ final class ReleaseList {
             throw new GeneralSecurityException("release list too large");
         }
         try {
+            checkDepth(envelope);
             final JsonObject root = read(envelope);
             if (!FORMAT.equals(root.getString("format")) || root.getJsonNumber("version").intValueExact() != 1) {
                 throw new GeneralSecurityException("unsupported release list");
             }
             final byte[] payload = BaseEncoding.base64().decode(root.getString("payload"));
             verifySignature(payload, root, signers);
+            checkDepth(payload);
             return parsePayload(read(payload));
         } catch (final JsonException | ClassCastException | NullPointerException | ArithmeticException |
                 IllegalArgumentException e) {
             throw new GeneralSecurityException("invalid release list", e);
+        }
+    }
+
+    static void checkDepth(final byte[] json) throws GeneralSecurityException {
+        int depth = 0;
+        boolean inString = false;
+        boolean escaped = false;
+        for (final byte b : json) {
+            if (inString) {
+                if (escaped) {
+                    escaped = false;
+                } else if (b == '\\') {
+                    escaped = true;
+                } else if (b == '"') {
+                    inString = false;
+                }
+            } else if (b == '"') {
+                inString = true;
+            } else if (b == '{' || b == '[') {
+                if (++depth > MAX_DEPTH) {
+                    throw new GeneralSecurityException("release list nested too deeply");
+                }
+            } else if (b == '}' || b == ']') {
+                depth--;
+            }
         }
     }
 

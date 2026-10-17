@@ -165,7 +165,7 @@ class AttestationProtocol {
     private static final String AUDITOR_APP_PACKAGE_NAME_RELEASE = "de.diamaneos.auditor";
     private static final String AUDITOR_APP_PACKAGE_NAME_RELEASE_GRAPHENEOS = "app.attestation.auditor";
     private static final String AUDITOR_APP_PACKAGE_NAME_PLAY = "app.attestation.auditor.play";
-    private static final String AUDITOR_APP_PACKAGE_NAME_DEBUG = "app.attestation.auditor.debug";
+    private static final String AUDITOR_APP_PACKAGE_NAME_DEBUG = "de.diamaneos.auditor.debug";
     private static final String AUDITOR_APP_SIGNATURE_DIGEST_RELEASE_GRAPHENEOS =
             "990E04F0864B19F14F84E0E432F7A393F297AB105A22C1E1B10B442A4A62C42C";
     private static final String AUDITOR_APP_SIGNATURE_DIGEST_PLAY =
@@ -486,8 +486,25 @@ class AttestationProtocol {
         return (X509Certificate) CertificateFactory.getInstance("X.509").generateCertificate(in);
     }
 
+    // Removes the leaf's challenge from the pending set, so no report can be used twice.
+    private static PendingChallenge consumeChallenge(final Certificate leaf,
+            final Cache<ByteBuffer, PendingChallenge> pendingChallenges) throws GeneralSecurityException {
+        final byte[] challenge;
+        try {
+            challenge = ParsedAttestationRecord.createParsedAttestationRecord(
+                    List.of((X509Certificate) leaf)).attestationChallenge;
+        } catch (final IOException | ParsedAttestationRecord.KeyDescriptionMissingException e) {
+            throw new GeneralSecurityException(e);
+        }
+        final PendingChallenge pending = pendingChallenges.asMap().remove(ByteBuffer.wrap(challenge));
+        if (pending == null) {
+            throw new GeneralSecurityException("challenge not pending");
+        }
+        return pending;
+    }
+
     private static Verified verifyStateless(final Certificate[] certificates,
-            final Cache<ByteBuffer, PendingChallenge> pendingChallenges, final boolean hasPersistentKey,
+            final PendingChallenge pending, final boolean hasPersistentKey,
             final byte[][] validRoots, final TrustConfig trust) throws GeneralSecurityException {
 
         verifyCertificateSignatures(certificates, hasPersistentKey);
@@ -519,12 +536,7 @@ class AttestationProtocol {
             throw new GeneralSecurityException("keymaster security level does not match attestation security level");
         }
 
-        // prevent replay attacks
-        final byte[] challenge = attestation.attestationChallenge;
-        final PendingChallenge pending = pendingChallenges.asMap().remove(ByteBuffer.wrap(challenge));
-        if (pending == null) {
-            throw new GeneralSecurityException("challenge not pending");
-        }
+        // replay attacks are prevented by consumeChallenge
 
         // enforce communicating with the Auditor app via OS level security
         final AuthorizationList softwareEnforced = attestation.softwareEnforced;
@@ -864,6 +876,8 @@ class AttestationProtocol {
             throw new GeneralSecurityException("must be authenticated with subscribeKey for initial verification");
         }
 
+        final PendingChallenge pending = consumeChallenge(attestationCertificates[0], pendingChallenges);
+
         final SQLiteConnection conn = AttestationServer.getLocalAttestationConn();
         // set once a paired profile 2 device has signed this report with its pinned key
         boolean authenticatedProfile2 = false;
@@ -930,20 +944,10 @@ class AttestationProtocol {
                 }
             }
 
-            final Verified verified = verifyStateless(attestationCertificates, pendingChallenges, hasPersistentKey,
-                    new byte[][]{GOOGLE_ROOT_CERTIFICATE_0, GOOGLE_ROOT_CERTIFICATE_1,
-                        GOOGLE_ROOT_CERTIFICATE_2, GOOGLE_ROOT_CERTIFICATE_3,
-                        GOOGLE_ROOT_CERTIFICATE_4,
-                    }, trust);
-            final byte[] verifiedBootKey = BaseEncoding.base16().decode(verified.verifiedBootKey);
-            final boolean profile2 = verified.profile2Device != null;
-
-            final long now = System.currentTimeMillis();
-            String reviewFlags = null;
-
+            // A paired device's report is authenticated before the other checks, so every
+            // failure it reports can raise an alert.
             if (hasPersistentKey) {
                 final int chainOffset;
-                final int pinOffset;
                 if (attestationCertificates.length != pinnedCertificates.length) {
                     if (attestationCertificates.length == 5 && pinnedCertificates.length == 4) {
                         // backwards compatible use of attest key without the security benefits for
@@ -967,7 +971,26 @@ class AttestationProtocol {
                 }
                 verifySignature(persistentCertificate.getPublicKey(), signedMessage, signature);
                 authenticatedProfile2 = pinnedTrustProfile == 2;
+                if (authenticatedProfile2 && releases == null) {
+                    throw new Profile2.ReleaseListUnavailableException();
+                }
+            }
 
+            final Verified verified = verifyStateless(attestationCertificates, pending, hasPersistentKey,
+                    new byte[][]{GOOGLE_ROOT_CERTIFICATE_0, GOOGLE_ROOT_CERTIFICATE_1,
+                        GOOGLE_ROOT_CERTIFICATE_2, GOOGLE_ROOT_CERTIFICATE_3,
+                        GOOGLE_ROOT_CERTIFICATE_4,
+                    }, trust);
+            final byte[] verifiedBootKey = BaseEncoding.base16().decode(verified.verifiedBootKey);
+            final boolean profile2 = verified.profile2Device != null;
+            if (profile2 && releases == null) {
+                throw new Profile2.ReleaseListUnavailableException();
+            }
+
+            final long now = System.currentTimeMillis();
+            String reviewFlags = null;
+
+            if (hasPersistentKey) {
                 if (!Arrays.equals(verifiedBootKey, pinnedVerifiedBootKey)) {
                     throw new GeneralSecurityException("pinned verified boot key mismatch");
                 }
@@ -1072,6 +1095,9 @@ class AttestationProtocol {
                     Profile2.checkFreshness(responseMs, Profile2.CHALLENGE_LIFETIME_MS);
                     Profile2.match(releases, verified.profile2Device, verified.evidence);
                     reviewFlags = String.join(", ", Profile2.reviewFlags(attestationCertificates, responseMs));
+                    if (pendingDevices(conn, userId) >= AttestationServer.MAX_PENDING_DEVICES) {
+                        throw new GeneralSecurityException("too many phones waiting for approval");
+                    }
                 }
 
                 verifySignature(attestationCertificates[0].getPublicKey(), signedMessage, signature);
@@ -1106,8 +1132,9 @@ class AttestationProtocol {
                             verifiedTimeLast,
                             userId,
                             trustProfile,
-                            reviewFlags
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""");
+                            reviewFlags,
+                            pending
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""");
                 try {
                     insert.bind(1, fingerprint);
                     insert.bind(2, encodeChain(DEFLATE_DICTIONARY_4, attestationCertificates));
@@ -1158,6 +1185,8 @@ class AttestationProtocol {
                     if (reviewFlags != null) {
                         insert.bind(29, reviewFlags);
                     }
+                    // a profile 2 phone waits for the account holder's approval
+                    insert.bind(30, profile2 ? 1 : 0);
                     insert.step();
                 } finally {
                     insert.dispose();
@@ -1242,6 +1271,18 @@ class AttestationProtocol {
             throw e;
         } finally {
             AttestationServer.rollbackIfNeeded(conn);
+        }
+    }
+
+    private static long pendingDevices(final SQLiteConnection conn, final long userId) throws SQLiteException {
+        final SQLiteStatement select = conn.prepare(
+                "SELECT count(*) FROM Devices WHERE userId = ? AND pending = 1 AND deletionTime IS NULL");
+        try {
+            select.bind(1, userId);
+            select.step();
+            return select.columnLong(0);
+        } finally {
+            select.dispose();
         }
     }
 

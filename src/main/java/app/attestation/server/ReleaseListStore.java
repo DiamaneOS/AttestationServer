@@ -43,11 +43,10 @@ final class ReleaseListStore {
         try {
             final long modified = Files.getLastModifiedTime(path).toMillis();
             final long size = Files.size(path);
+            // remembered only once a list is accepted, so a failed attempt is retried
             if (modified == checkedModified && size == checkedSize) {
                 return;
             }
-            checkedModified = modified;
-            checkedSize = size;
             if (size > ReleaseList.MAX_SIZE) {
                 throw new GeneralSecurityException("release list too large");
             }
@@ -76,6 +75,8 @@ final class ReleaseListStore {
             }
             current = list;
             currentBytes = bytes;
+            checkedModified = modified;
+            checkedSize = size;
         } catch (final NoSuchFileException e) {
             // no release list published yet
         } catch (final GeneralSecurityException | IOException | SQLiteException e) {

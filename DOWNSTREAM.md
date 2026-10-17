@@ -17,7 +17,11 @@ Some phones attest only with keys that chain to no manufacturer root. A second t
 
 The person pairing confirms in Auditor how the phone was set up. The web interface and emails label these devices "First pairing not verified by hardware". Response time and certificate encoding only flag a pairing for review.
 
-Later checks follow the pinned chain like any other pairing. Their boot hash must stay on the release list. A downgrade or an unlisted build from a paired device raises a failure alert.
+A new device of this kind waits until the logged-in account holder approves it, after an email with its details. Until then it is not monitored and raises no alerts. Rejecting it removes it. An account can have at most three such devices waiting.
+
+Later checks follow the pinned chain like any other pairing. Their boot hash must stay on the release list. A paired device's report is authenticated with its pinned key first, so any failed check from it raises a failure alert. A replayed report cannot.
+
+Without an accepted release list the server answers 503 and records nothing.
 
 Device details and trusted keys are in `src/main/resources/app/attestation/server/diamaneos-trust.json`. Test deployments can replace it with `-Ddiamaneos.trust=<file>`.
 

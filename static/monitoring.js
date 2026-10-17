@@ -181,6 +181,7 @@ function reloadEnrollLink() {
         addThisPhone.onclick = () => {
             location.href = result.link;
         };
+        addThisPhone.innerText = "Add this phone to account number " + result.userId;
         addThisPhone.hidden = false;
     }).catch(error => {
         console.log(error);
@@ -381,6 +382,29 @@ function fetchDevices() {
                         });
                     }
                 };
+            }
+
+            if (device.pending) {
+                info.appendChild(create("p", "Waiting for your approval. Approve this phone only if you added it " +
+                    "yourself. Until then it is not monitored and raises no alerts."));
+                for (const [label, resource] of [["approve device", "/api/approve-device"], ["reject device", "/api/reject-device"]]) {
+                    const button = info.appendChild(create("button", label));
+                    button.onclick = event => {
+                        if (confirm(`Are you sure you want to ${label.split(" ")[0]} the device ${fingerprint}?`)) {
+                            event.target.disabled = true;
+                            post(resource, JSON.stringify({"fingerprint": device.fingerprint})).then(response => {
+                                if (!response.ok) {
+                                    return Promise.reject(new Error(response.status));
+                                }
+                                devices.innerText = null;
+                                fetchDevices();
+                            }).catch(error => {
+                                event.target.disabled = false;
+                                console.log(error);
+                            });
+                        }
+                    };
+                }
             }
 
             if (device.trustProfile == 2) {
@@ -736,6 +760,7 @@ rotate.onclick = () => {
             }
             rotate.disabled = false;
             reloadQrCode();
+            reloadEnrollLink();
         }).catch(error => {
             rotate.disabled = false;
             console.log(error);
@@ -767,6 +792,7 @@ configuration.onsubmit = event => {
         }
         configuration.submit.disabled = false;
         reloadQrCode();
+        reloadEnrollLink();
     }).catch(error => {
         configuration.submit.disabled = false;
         console.log(error);

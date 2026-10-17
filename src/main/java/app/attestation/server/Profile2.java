@@ -33,6 +33,13 @@ final class Profile2 {
             int osPatchLevel, int vendorPatchLevel, int bootPatchLevel, int attestationVersion,
             int keyMintVersion) {}
 
+    // No accepted release list is loaded. A server problem, so nothing is recorded or alerted.
+    static final class ReleaseListUnavailableException extends java.io.IOException {
+        ReleaseListUnavailableException() {
+            super("no release list loaded");
+        }
+    }
+
     // Thrown for a paired device whose authenticated report breaks the release list policy
     static final class PolicyException extends GeneralSecurityException {
         PolicyException(final String message) {
