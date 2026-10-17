@@ -4,16 +4,12 @@ from datetime import datetime, timezone
 from os.path import getmtime
 from pathlib import Path
 
-base = "https://attestation.app"
+base = "https://attestation.diamaneos.de"
 
 pages = [
     ["/", 1.0],
-    ["/.well-known/security.txt", 0.0],
     ["/LICENSE.txt", 0.0],
-    ["/about", 1.0],
-    ["/donate", 0.5],
     ["/contact", 0.1],
-    ["/humans.txt", 0.0],
     ["/privacy-policy", 0.2],
     ["/source", 0.1],
     ["/tutorial", 1.0]
