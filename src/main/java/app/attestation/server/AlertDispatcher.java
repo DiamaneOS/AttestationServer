@@ -51,6 +51,69 @@ class AlertDispatcher implements Runnable {
         builder.append("\n");
     }
 
+    // Asks once per device whether a phone that stopped checking in was reset, after a newer device
+    // joined the same account. Retiring stays an explicit choice in the web interface.
+    private static void sendRetireSuggestions(final Session session, final String emailFrom, final long now,
+            final SQLiteStatement selectRetireSuggestions, final SQLiteStatement updateRetireSuggested,
+            final SQLiteStatement selectEmails) throws SQLiteException {
+        final java.util.LinkedHashMap<Long, String> usernames = new java.util.LinkedHashMap<>();
+        final java.util.LinkedHashMap<Long, StringBuilder> devices = new java.util.LinkedHashMap<>();
+        final ArrayList<byte[]> fingerprints = new ArrayList<>();
+        try {
+            selectRetireSuggestions.bind(1, now);
+            while (selectRetireSuggestions.step()) {
+                final long userId = selectRetireSuggestions.columnLong(0);
+                usernames.put(userId, selectRetireSuggestions.columnString(1));
+                final byte[] fingerprint = selectRetireSuggestions.columnBlob(2);
+                fingerprints.add(fingerprint);
+                appendFingerprint(devices.computeIfAbsent(userId, k -> new StringBuilder()), fingerprint,
+                        selectRetireSuggestions.columnInt(3));
+            }
+        } finally {
+            selectRetireSuggestions.reset();
+        }
+
+        for (final var entry : devices.entrySet()) {
+            final ArrayList<String> addresses = new ArrayList<>();
+            try {
+                selectEmails.bind(1, entry.getKey());
+                while (selectEmails.step()) {
+                    addresses.add(selectEmails.columnString(0));
+                }
+            } finally {
+                selectEmails.reset();
+            }
+            for (final String address : addresses) {
+                try {
+                    final Message message = new MimeMessage(session);
+                    message.setFrom(new InternetAddress(emailFrom, EMAIL_DISPLAY_NAME));
+                    message.setRecipients(Message.RecipientType.TO, InternetAddress.parse(address));
+                    message.setSubject("Was the old phone reset?");
+                    message.setText("This is a message for the account '" + usernames.get(entry.getKey()) + "'.\n\n" +
+                            "A new device started checking in after these devices stopped:\n\n" +
+                            entry.getValue() + "\nWas the old phone reset? Retire it.\n\n" +
+                            "Log in to https://" + AttestationServer.DOMAIN + "/ and select Retire on the old device. " +
+                            "Its record and history are kept and it stops raising alerts.\n\n" +
+                            "If you do not want to receive these emails and cannot log in to the account,\nemail " +
+                            emailFrom + " from the address receiving them.");
+                    Transport.send(message);
+                } catch (final MessagingException | UnsupportedEncodingException e) {
+                    logger.log(Level.WARNING, "email error", e);
+                }
+            }
+        }
+
+        for (final byte[] fingerprint : fingerprints) {
+            try {
+                updateRetireSuggested.bind(1, now);
+                updateRetireSuggested.bind(2, fingerprint);
+                updateRetireSuggested.step();
+            } finally {
+                updateRetireSuggested.reset();
+            }
+        }
+    }
+
     @Override
     public void run() {
         final SQLiteConnection conn;
@@ -67,6 +130,8 @@ class AlertDispatcher implements Runnable {
         final SQLiteStatement selectFailed;
         final SQLiteStatement selectAccountsForFailureAlert;
         final SQLiteStatement updateFailureAlert;
+        final SQLiteStatement selectRetireSuggestions;
+        final SQLiteStatement updateRetireSuggested;
         final SQLiteStatement selectEmails;
         try {
             selectConfiguration = conn.prepare("""
@@ -81,24 +146,32 @@ class AlertDispatcher implements Runnable {
                     SELECT userId, username, alertDelay FROM Accounts
                     WHERE (SELECT 1 FROM Devices WHERE userId = Accounts.userID
                         AND verifiedTimeLast < ? - alertDelay * 1000 AND deletionTime is NULL
+                        AND retiredTime IS NULL
                         AND (expiredTimeLast IS NULL OR expiredTimeLast < ?))""");
             selectExpired = conn.prepare("""
                     SELECT fingerprint, trustProfile FROM Devices
-                    WHERE userId = ? AND verifiedTimeLast < ? AND deletionTime IS NULL""");
+                    WHERE userId = ? AND verifiedTimeLast < ? AND deletionTime IS NULL
+                    AND retiredTime IS NULL""");
             updateExpired = conn.prepare(
                     "UPDATE Devices SET expiredTimeLast = ? WHERE fingerprint = ?");
             selectFailed = conn.prepare("""
                     SELECT fingerprint, trustProfile, failureReason FROM Devices
                     WHERE userId = ? AND failureTimeLast > coalesce(failureAlertTime, 0)
-                    AND trustProfile = 2 AND deletionTime IS NULL""");
+                    AND trustProfile = 2 AND deletionTime IS NULL AND retiredTime IS NULL""");
             // Only profile 2 devices record failures, so profile 1 alerting is unchanged.
             selectAccountsForFailureAlert = conn.prepare("""
                     SELECT userId, username, alertDelay FROM Accounts
                     WHERE EXISTS (SELECT 1 FROM Devices WHERE userId = Accounts.userId
                         AND failureTimeLast > coalesce(failureAlertTime, 0) AND trustProfile = 2
-                        AND deletionTime IS NULL)""");
+                        AND deletionTime IS NULL AND retiredTime IS NULL)""");
             updateFailureAlert = conn.prepare(
                     "UPDATE Devices SET failureAlertTime = ? WHERE userId = ? AND trustProfile = 2");
+            selectRetireSuggestions = conn.prepare("""
+                    SELECT Devices.userId, username, fingerprint, trustProfile FROM Devices
+                    INNER JOIN Accounts ON Accounts.userId = Devices.userId
+                    WHERE retireSuggestedTime IS NULL AND\s""" + AttestationServer.RETIRE_SUGGESTED);
+            updateRetireSuggested = conn.prepare(
+                    "UPDATE Devices SET retireSuggestedTime = ? WHERE fingerprint = ?");
             selectEmails = conn.prepare("SELECT address FROM EmailAddresses WHERE userId = ?");
         } catch (final SQLiteException e) {
             conn.dispose();
@@ -315,6 +388,9 @@ class AlertDispatcher implements Runnable {
                         updateFailureAlert.reset();
                     }
                 }
+
+                sendRetireSuggestions(session, emailFrom, now, selectRetireSuggestions,
+                        updateRetireSuggested, selectEmails);
             } catch (final SQLiteException e) {
                 logger.log(Level.WARNING, "database error", e);
             }

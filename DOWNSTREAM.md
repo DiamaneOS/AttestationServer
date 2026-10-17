@@ -23,6 +23,10 @@ Device details and trusted keys are in `src/main/resources/app/attestation/serve
 
 The release pipeline places the signed list in the working directory as `releases.json`, or at `-Ddiamaneos.releases=<file>`. A list that fails verification or has a lower sequence than an accepted one is ignored.
 
+When a device stops checking in after a newer device joined the same account, the web interface and an email ask whether the old phone was reset.
+
+Retiring it is one explicit action by the logged-in account holder. The record and its history stay, alerts stop and its checks are refused.
+
 The database retains accounts, device pairing information, verification history and optional alert addresses. Retention behavior is implemented in [Maintenance.java](src/main/java/app/attestation/server/Maintenance.java).
 
 The [Debian deployment](https://github.com/DiamaneOS/infrastructure/tree/main/debian) separates root-owned code from application-writable encrypted state. The service account has no login or deployment permissions. `nginx/service-state.conf` controls public enrollment.
