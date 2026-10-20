@@ -33,6 +33,7 @@ class AlertDispatcher implements Runnable {
 
     private record Account(long userId, String username, int alertDelay) {}
 
+                            "It stops raising alerts, and its record and history are kept until 90 days after its last successful check.\n\n" +
     @Override
     public void run() {
         final SQLiteConnection conn;
