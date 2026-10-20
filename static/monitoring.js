@@ -330,6 +330,7 @@ function fetchDevices() {
                 }
             };
 
+                    if (confirm(`Retire the device ${fingerprint}? It stops raising alerts, and its record and history are kept until 90 days after its last successful check.`)) {
             info.appendChild(create("h3", "Hardware verified information:"));
             info.appendChild(document.createTextNode("Pairing identity (hash of pinned hardware-backed key): "));
             info.appendChild(create("span", fingerprint, "fingerprint"));
