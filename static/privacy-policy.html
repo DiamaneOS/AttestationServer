@@ -48,7 +48,7 @@
       <li>Accounts with no remaining device records: after 365 days without a login.</li>
     </ul>
     <p>Deletion removes records from the live database. Requests to access or erase account data use the contact details above. Account deletion is handled through that request process, rather than a self-service account-delete button.</p>
-    <p>Operational journals use volatile storage with a one-day retention limit and are cleared on reboot. Application logging is restricted to critical failures.</p>
+    <p>The system journal is kept on disk with a 14-day retention limit, so the cause of a restart can be found. It holds system, kernel and login messages, not request data. The attestation service's own log stays in memory with a one-day retention limit, is cleared on reboot and is restricted to critical failures.</p>
 
     <h2>Encrypted backups</h2>
     <p>Encrypted copies of the database are kept in Backblaze B2 in the Netherlands (EU Central) and on an offline encrypted disk. A new copy is made when the service's configuration changes. Only a key kept offline can decrypt them. They are used to recover after data loss, not for ordinary account or device queries.</p>
