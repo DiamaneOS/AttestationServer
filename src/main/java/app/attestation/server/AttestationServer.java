@@ -1069,10 +1069,10 @@ class AttestationServer {
             server.createContext("/api/account.png", new AccountQrHandler());
             server.createContext("/api/configuration", new ConfigurationHandler());
             server.createContext("/api/delete-device", new DeleteDeviceHandler());
-            server.createContext("/api/retire-device", new RetireDeviceHandler());
+            server.createContext("/api/retire-device", new Profile2Handlers.RetireDeviceHandler());
             server.createContext("/api/approve-device", new Profile2Handlers.PendingDeviceHandler(true));
             server.createContext("/api/reject-device", new Profile2Handlers.PendingDeviceHandler(false));
-            server.createContext("/api/enroll-link", new EnrollLinkHandler());
+            server.createContext("/api/enroll-link", new Profile2Handlers.EnrollLinkHandler());
             server.createContext("/releases.json", new Profile2Handlers.ReleaseListHandler());
             server.createContext("/api/devices.json", new DevicesHandler());
             server.createContext("/api/attestation-history.json", new AttestationHistoryHandler());
@@ -1810,85 +1810,6 @@ class AttestationServer {
             }
             logger.info("scheduled deletion of device " + fingerprint + " from account " + account.userId);
             exchange.sendResponseHeaders(200, -1);
-        }
-    }
-
-    private static class RetireDeviceHandler extends PostHandler {
-        @Override
-        public void handlePost(final HttpExchange exchange) throws IOException, SQLiteException {
-            final String fingerprint;
-            try (final JsonReader reader = Json.createReader(exchange.getRequestBody())) {
-                final JsonObject object = reader.readObject();
-                fingerprint = object.getString("fingerprint");
-            } catch (final ClassCastException | JsonException | NullPointerException e) {
-                logger.log(Level.WARNING, "invalid request", e);
-                exchange.sendResponseHeaders(400, -1);
-                return;
-            }
-
-            final Account account = verifySession(exchange, false);
-            if (account == null) {
-                return;
-            }
-
-            final byte[] fingerprintBytes;
-            try {
-                fingerprintBytes = BaseEncoding.base16().decode(fingerprint);
-            } catch (final IllegalArgumentException e) {
-                exchange.sendResponseHeaders(400, -1);
-                return;
-            }
-            if (!retireDevice(account.userId, fingerprintBytes)) {
-                exchange.sendResponseHeaders(400, -1);
-                return;
-            }
-            exchange.sendResponseHeaders(200, -1);
-        }
-    }
-
-    // Archives a device of this account with its history. It stops raising alerts and its
-    // checks are refused from then on.
-    static boolean retireDevice(final long userId, final byte[] fingerprint) throws SQLiteException {
-        final SQLiteConnection conn = getLocalAttestationConn();
-        final SQLiteStatement update = conn.prepare("""
-                UPDATE Devices SET retiredTime = ? WHERE userId = ? AND fingerprint = ?
-                AND retiredTime IS NULL AND deletionTime IS NULL""");
-        try {
-            update.bind(1, System.currentTimeMillis());
-            update.bind(2, userId);
-            update.bind(3, fingerprint);
-            update.step();
-        } finally {
-            update.dispose();
-        }
-        return conn.getChanges() == 1;
-    }
-
-    // The same account data as the QR code, as a link only Auditor can receive.
-    static String enrollLink(final long userId, final byte[] subscribeKey, final int verifyInterval) {
-        final String account = DOMAIN + " " + userId + " " + BaseEncoding.base64().encode(subscribeKey)
-                + " " + verifyInterval;
-        return "intent://enroll?account=" + java.net.URLEncoder.encode(account, StandardCharsets.UTF_8)
-                .replace("+", "%20")
-                + "#Intent;scheme=diamaneos-auditor;package=de.diamaneos.auditor;end";
-    }
-
-    private static class EnrollLinkHandler extends PostHandler {
-        @Override
-        public void handlePost(final HttpExchange exchange) throws IOException, SQLiteException {
-            final Account account = verifySession(exchange, false);
-            if (account == null) {
-                return;
-            }
-            final JsonObjectBuilder result = Json.createObjectBuilder();
-            result.add("link", enrollLink(account.userId, account.subscribeKey, account.verifyInterval));
-            result.add("userId", account.userId);
-            exchange.getResponseHeaders().set("Content-Type", "application/json");
-            exchange.sendResponseHeaders(200, 0);
-            try (final OutputStream output = exchange.getResponseBody();
-                    final JsonWriter writer = Json.createWriter(output)) {
-                writer.write(result.build());
-            }
         }
     }
 
