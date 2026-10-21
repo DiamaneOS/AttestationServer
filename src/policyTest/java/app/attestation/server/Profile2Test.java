@@ -51,8 +51,8 @@ public final class Profile2Test {
 
         // a new profile 2 phone waits for the account holder
         require(column(phone, "pending") == 1, "new profile 2 phone pending");
-        require(!AttestationServer.approveDevice(bob, fingerprint(phone)), "other account cannot approve it");
-        require(AttestationServer.approveDevice(alice, fingerprint(phone)), "account holder approves it");
+        require(!Profile2Handlers.approveDevice(bob, fingerprint(phone)), "other account cannot approve it");
+        require(Profile2Handlers.approveDevice(alice, fingerprint(phone)), "account holder approves it");
         require(column(phone, "pending") == 0, "approved phone is monitored");
 
         firstPairingRejected("challenge expired", alice, list1, f -> {}, 31000);
@@ -138,7 +138,7 @@ public final class Profile2Test {
         setLastVerified(phone, System.currentTimeMillis() - 13L * 60 * 60 * 1000);
         verify(reset.message(), alice, false, list2);
         require(!retireSuggested(phone), "a pending phone does not replace the old one");
-        require(AttestationServer.approveDevice(alice, fingerprint(reset)), "new phone approved");
+        require(Profile2Handlers.approveDevice(alice, fingerprint(reset)), "new phone approved");
         require(retireSuggested(phone) && !retireSuggested(reset), "old phone suggested for retiring");
         require(!AttestationServer.retireDevice(bob, fingerprint(phone)), "other account cannot retire it");
         require(AttestationServer.retireDevice(alice, fingerprint(phone)), "account holder retires it");
@@ -164,12 +164,12 @@ public final class Profile2Test {
         third.challenge = challenge(bob, 1000);
         verify(third.message(), bob, false, list1);
         firstPairingRejected("too many phones waiting", bob, list1, f -> {}, 1000);
-        require(AttestationServer.rejectDevice(bob, fingerprint(third)), "account holder rejects a phone");
+        require(Profile2Handlers.rejectDevice(bob, fingerprint(third)), "account holder rejects a phone");
         require(!exists(third), "rejected phone removed");
         final Profile2Fixture fourth = new Profile2Fixture();
         fourth.challenge = challenge(bob, 1000);
         verify(fourth.message(), bob, false, list1);
-        require(!AttestationServer.rejectDevice(bob, fingerprint(phone)), "approved phones cannot be rejected");
+        require(!Profile2Handlers.rejectDevice(bob, fingerprint(phone)), "approved phones cannot be rejected");
 
         releaseListStore();
         challengeLimit();
