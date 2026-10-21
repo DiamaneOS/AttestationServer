@@ -1070,10 +1070,10 @@ class AttestationServer {
             server.createContext("/api/configuration", new ConfigurationHandler());
             server.createContext("/api/delete-device", new DeleteDeviceHandler());
             server.createContext("/api/retire-device", new RetireDeviceHandler());
-            server.createContext("/api/approve-device", new PendingDeviceHandler(true));
-            server.createContext("/api/reject-device", new PendingDeviceHandler(false));
+            server.createContext("/api/approve-device", new Profile2Handlers.PendingDeviceHandler(true));
+            server.createContext("/api/reject-device", new Profile2Handlers.PendingDeviceHandler(false));
             server.createContext("/api/enroll-link", new EnrollLinkHandler());
-            server.createContext("/releases.json", new ReleaseListHandler());
+            server.createContext("/releases.json", new Profile2Handlers.ReleaseListHandler());
             server.createContext("/api/devices.json", new DevicesHandler());
             server.createContext("/api/attestation-history.json", new AttestationHistoryHandler());
             server.createContext("/auditor/challenge", new ChallengeHandler());
@@ -1108,7 +1108,7 @@ class AttestationServer {
         return values.get(0);
     }
 
-    private abstract static class PostHandler implements HttpHandler {
+    abstract static class PostHandler implements HttpHandler {
         protected abstract void handlePost(final HttpExchange exchange) throws IOException, SQLiteException;
 
         public void checkRequestHeaders(final HttpExchange exchange) throws GeneralSecurityException {
@@ -1555,9 +1555,9 @@ class AttestationServer {
                 "__Host-Http-session=; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=0");
     }
 
-    private record Account(long userId, String username, byte[] subscribeKey, int verifyInterval, int alertDelay) {}
+    record Account(long userId, String username, byte[] subscribeKey, int verifyInterval, int alertDelay) {}
 
-    private static Account verifySession(final HttpExchange exchange, final boolean end)
+    static Account verifySession(final HttpExchange exchange, final boolean end)
             throws IOException, SQLiteException {
         final String cookie = getCookie(exchange, "__Host-Http-session");
         if (cookie == null) {
@@ -1864,66 +1864,6 @@ class AttestationServer {
         return conn.getChanges() == 1;
     }
 
-    // A new profile 2 phone needs the account holder's approval before it is monitored. A rejected
-    // one is removed with its history.
-    private static class PendingDeviceHandler extends PostHandler {
-        private final boolean approve;
-
-        PendingDeviceHandler(final boolean approve) {
-            this.approve = approve;
-        }
-
-        @Override
-        public void handlePost(final HttpExchange exchange) throws IOException, SQLiteException {
-            final byte[] fingerprint;
-            try (final JsonReader reader = Json.createReader(exchange.getRequestBody())) {
-                fingerprint = BaseEncoding.base16().decode(reader.readObject().getString("fingerprint"));
-            } catch (final ClassCastException | JsonException | NullPointerException | IllegalArgumentException e) {
-                logger.log(Level.WARNING, "invalid request", e);
-                exchange.sendResponseHeaders(400, -1);
-                return;
-            }
-
-            final Account account = verifySession(exchange, false);
-            if (account == null) {
-                return;
-            }
-
-            final boolean changed = approve ? approveDevice(account.userId, fingerprint)
-                    : rejectDevice(account.userId, fingerprint);
-            exchange.sendResponseHeaders(changed ? 200 : 400, -1);
-        }
-    }
-
-    static boolean approveDevice(final long userId, final byte[] fingerprint) throws SQLiteException {
-        final SQLiteConnection conn = getLocalAttestationConn();
-        final SQLiteStatement update = conn.prepare("""
-                UPDATE Devices SET pending = 0 WHERE userId = ? AND fingerprint = ? AND pending = 1
-                AND deletionTime IS NULL""");
-        try {
-            update.bind(1, userId);
-            update.bind(2, fingerprint);
-            update.step();
-        } finally {
-            update.dispose();
-        }
-        return conn.getChanges() == 1;
-    }
-
-    static boolean rejectDevice(final long userId, final byte[] fingerprint) throws SQLiteException {
-        final SQLiteConnection conn = getLocalAttestationConn();
-        final SQLiteStatement delete = conn.prepare(
-                "DELETE FROM Devices WHERE userId = ? AND fingerprint = ? AND pending = 1");
-        try {
-            delete.bind(1, userId);
-            delete.bind(2, fingerprint);
-            delete.step();
-        } finally {
-            delete.dispose();
-        }
-        return conn.getChanges() == 1;
-    }
-
     // The same account data as the QR code, as a link only Auditor can receive.
     static String enrollLink(final long userId, final byte[] subscribeKey, final int verifyInterval) {
         final String account = DOMAIN + " " + userId + " " + BaseEncoding.base64().encode(subscribeKey)
@@ -1948,34 +1888,6 @@ class AttestationServer {
             try (final OutputStream output = exchange.getResponseBody();
                     final JsonWriter writer = Json.createWriter(output)) {
                 writer.write(result.build());
-            }
-        }
-    }
-
-    // Serves the signed release list this server verified and accepted.
-    private static class ReleaseListHandler implements HttpHandler {
-        @Override
-        public void handle(final HttpExchange exchange) throws IOException {
-            try {
-                if (!exchange.getRequestMethod().equals("GET")) {
-                    exchange.getResponseHeaders().set("Allow", "GET");
-                    exchange.sendResponseHeaders(405, -1);
-                    return;
-                }
-                ReleaseListStore.refresh();
-                final byte[] list = ReleaseListStore.currentBytes();
-                if (list == null) {
-                    exchange.sendResponseHeaders(404, -1);
-                    return;
-                }
-                exchange.getResponseHeaders().set("Content-Type", "application/json");
-                exchange.getResponseHeaders().set("Cache-Control", "no-cache");
-                exchange.sendResponseHeaders(200, list.length);
-                try (final OutputStream output = exchange.getResponseBody()) {
-                    output.write(list);
-                }
-            } finally {
-                exchange.close();
             }
         }
     }
