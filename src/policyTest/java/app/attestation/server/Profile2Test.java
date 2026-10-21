@@ -140,8 +140,8 @@ public final class Profile2Test {
         require(!retireSuggested(phone), "a pending phone does not replace the old one");
         require(Profile2Handlers.approveDevice(alice, fingerprint(reset)), "new phone approved");
         require(retireSuggested(phone) && !retireSuggested(reset), "old phone suggested for retiring");
-        require(!AttestationServer.retireDevice(bob, fingerprint(phone)), "other account cannot retire it");
-        require(AttestationServer.retireDevice(alice, fingerprint(phone)), "account holder retires it");
+        require(!Profile2Handlers.retireDevice(bob, fingerprint(phone)), "other account cannot retire it");
+        require(Profile2Handlers.retireDevice(alice, fingerprint(phone)), "account holder retires it");
         require(!retireSuggested(phone), "retired device no longer suggested");
         rejected("device retired", () -> {
             phone.nextCheck(challenge(-1, 0));
@@ -409,7 +409,7 @@ public final class Profile2Test {
     private static void enrollLink() {
         final byte[] key = new byte[32];
         key[0] = (byte) 0xfb;
-        final String link = AttestationServer.enrollLink(7, key, 21600);
+        final String link = Profile2Handlers.enrollLink(7, key, 21600);
         require(link.startsWith("intent://enroll?account=")
                 && link.endsWith("#Intent;scheme=diamaneos-auditor;package=de.diamaneos.auditor;end"),
                 "link restricted to Auditor");
