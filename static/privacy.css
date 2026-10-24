@@ -1,16 +1,87 @@
-:root { color-scheme: light dark; --bg: #f6f3ef; --ink: #1d1b19; --muted: #5e5952; --accent: #8a5100; }
-@media (prefers-color-scheme: dark) { :root { --bg: #100e0b; --ink: #ebe8e4; --muted: #c0bbb3; --accent: #ffb956; } }
-* { box-sizing: border-box; }
-body { max-width: 44rem; margin: 0 auto; padding: 1.5rem clamp(1rem, 4vw, 2rem) 3rem; background: var(--bg); color: var(--ink); font: 1.08rem/1.6 system-ui, sans-serif; overflow-wrap: break-word; }
-header { margin-bottom: 2rem; }
-h1, h2 { line-height: 1.2; font-weight: 600; }
-h1 { font-size: clamp(1.8rem, 4vw, 2.5rem); }
-h2 { font-size: 1.3rem; margin: 2rem 0 .75rem; }
-address { font-style: normal; }
-a { color: var(--accent); text-underline-offset: .18em; }
-header a { display: inline-block; min-height: 44px; }
-li + li { margin-top: .5rem; }
-:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-main:focus { outline: none; }
-.skip { position: absolute; top: -4rem; }
-.skip:focus { top: .5rem; background: var(--bg); padding: .5rem; }
+:root {
+    color-scheme: light dark;
+
+    --bg: #f6f3ef;
+    --ink: #1d1b19;
+    --muted: #5e5952;
+    --accent: #8a5100;
+}
+
+@media (prefers-color-scheme: dark) {
+    :root {
+        --bg: #100e0b;
+        --ink: #ebe8e4;
+        --muted: #c0bbb3;
+        --accent: #ffb956;
+    }
+}
+
+* {
+    box-sizing: border-box;
+}
+
+body {
+    max-width: 44rem;
+    margin: 0 auto;
+    padding: 1.5rem clamp(1rem, 4vw, 2rem) 3rem;
+    background: var(--bg);
+    color: var(--ink);
+    font: 1.08rem/1.6 system-ui, sans-serif;
+    overflow-wrap: break-word;
+}
+
+header {
+    margin-bottom: 2rem;
+}
+
+h1, h2 {
+    line-height: 1.2;
+    font-weight: 600;
+}
+
+h1 {
+    font-size: clamp(1.8rem, 4vw, 2.5rem);
+}
+
+h2 {
+    font-size: 1.3rem;
+    margin: 2rem 0 .75rem;
+}
+
+address {
+    font-style: normal;
+}
+
+a {
+    color: var(--accent);
+    text-underline-offset: .18em;
+}
+
+header a {
+    display: inline-block;
+    min-height: 44px;
+}
+
+li + li {
+    margin-top: .5rem;
+}
+
+:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+}
+
+main:focus {
+    outline: none;
+}
+
+.skip {
+    position: absolute;
+    top: -4rem;
+}
+
+.skip:focus {
+    top: .5rem;
+    background: var(--bg);
+    padding: .5rem;
+}
