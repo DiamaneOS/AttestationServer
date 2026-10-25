@@ -233,7 +233,8 @@ class AttestationServer {
                 retiredTime INTEGER,
                 retireSuggestedTime INTEGER,
                 pending INTEGER NOT NULL DEFAULT 0 CHECK (pending in (0, 1)),
-                pendingNoticeTime INTEGER
+                pendingNoticeTime INTEGER,
+                failureAlertReason TEXT
             ) STRICT;
 
             CREATE TABLE IF NOT EXISTS Attestations (
@@ -300,7 +301,7 @@ class AttestationServer {
             final SQLiteStatement selectCreated = conn.prepare(
                     "SELECT 1 FROM sqlite_master WHERE type='table' AND name='Configuration'");
             if (!selectCreated.step()) {
-                conn.exec("PRAGMA user_version = 18");
+                conn.exec("PRAGMA user_version = 19");
             }
             selectCreated.dispose();
 
@@ -473,6 +474,23 @@ class AttestationServer {
                         conn.exec("ALTER TABLE Devices ADD COLUMN " + column[0] + " " + column[1]);
                     }
                 }
+                conn.exec("PRAGMA user_version = " + targetUserVersion);
+                conn.exec("COMMIT TRANSACTION");
+                userVersion = targetUserVersion;
+                logger.info("Migrated to schema version: " + userVersion);
+            }
+
+            // the reason of the last failure alert, for throttling failure alerts
+            targetUserVersion = 19;
+            if (userVersion < targetUserVersion) {
+                conn.exec("BEGIN IMMEDIATE TRANSACTION");
+                if (!hasColumn(conn, "Devices", "failureAlertReason")) {
+                    conn.exec("ALTER TABLE Devices ADD COLUMN failureAlertReason TEXT");
+                }
+                // Before 19 every failure up to failureAlertTime was alerted, so the last one's reason was.
+                conn.exec("""
+                        UPDATE Devices SET failureAlertReason = failureReason
+                        WHERE failureAlertReason IS NULL AND failureTimeLast <= failureAlertTime""");
                 conn.exec("PRAGMA user_version = " + targetUserVersion);
                 conn.exec("COMMIT TRANSACTION");
                 userVersion = targetUserVersion;
