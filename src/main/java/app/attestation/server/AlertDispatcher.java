@@ -179,6 +179,30 @@ class AlertDispatcher implements Runnable {
         }
     }
 
+    // A phone that keeps failing for the same reason alerts at most once per ALERT_THROTTLE_MS. A new
+    // reason, or a failure after a successful check since the last alert, alerts at once. A failure the
+    // phone recovered from within that time raises no late alert.
+    private static final String FAILURE_ALERT_DUE = """
+            trustProfile = 2 AND deletionTime IS NULL AND retiredTime IS NULL AND pending = 0
+            AND failureTimeLast > coalesce(failureAlertTime, 0)
+            AND (failureAlertTime IS NULL OR failureReason IS NOT failureAlertReason
+                OR failureTimeLast - failureAlertTime >= %d
+                OR (verifiedTimeLast > failureAlertTime AND failureTimeLast > verifiedTimeLast))"""
+            .formatted(ALERT_THROTTLE_MS);
+
+    private SQLiteStatement selectConfiguration;
+    private SQLiteStatement selectAccountsForExpiryAlert;
+    private SQLiteStatement selectExpired;
+    private SQLiteStatement updateExpired;
+    private SQLiteStatement selectFailed;
+    private SQLiteStatement selectAccountsForFailureAlert;
+    private SQLiteStatement updateFailureAlert;
+    private SQLiteStatement selectPendingNotices;
+    private SQLiteStatement updatePendingNotice;
+    private SQLiteStatement selectRetireSuggestions;
+    private SQLiteStatement updateRetireSuggested;
+    private SQLiteStatement selectEmails;
+
     @Override
     public void run() {
         final SQLiteConnection conn;
@@ -188,66 +212,8 @@ class AlertDispatcher implements Runnable {
             logger.log(CRIT, "database error, cannot set up AlertDispatcher thread", e);
             return;
         }
-        final SQLiteStatement selectConfiguration;
-        final SQLiteStatement selectAccountsForExpiryAlert;
-        final SQLiteStatement selectExpired;
-        final SQLiteStatement updateExpired;
-        final SQLiteStatement selectFailed;
-        final SQLiteStatement selectAccountsForFailureAlert;
-        final SQLiteStatement updateFailureAlert;
-        final SQLiteStatement selectPendingNotices;
-        final SQLiteStatement updatePendingNotice;
-        final SQLiteStatement selectRetireSuggestions;
-        final SQLiteStatement updateRetireSuggested;
-        final SQLiteStatement selectEmails;
         try {
-            selectConfiguration = conn.prepare("""
-                    SELECT
-                    (SELECT value FROM Configuration WHERE key = 'emailLocal'),
-                    (SELECT value FROM Configuration WHERE key = 'emailUsername'),
-                    (SELECT value FROM Configuration WHERE key = 'emailPassword'),
-                    (SELECT value FROM Configuration WHERE key = 'emailHost'),
-                    (SELECT value FROM Configuration WHERE key = 'emailPort'),
-                    (SELECT value FROM Configuration WHERE key = 'emailFrom')""");
-            selectAccountsForExpiryAlert = conn.prepare("""
-                    SELECT userId, username, alertDelay FROM Accounts
-                    WHERE (SELECT 1 FROM Devices WHERE userId = Accounts.userID
-                        AND verifiedTimeLast < ? - alertDelay * 1000 AND deletionTime is NULL
-                        AND retiredTime IS NULL AND pending = 0
-                        AND (expiredTimeLast IS NULL OR expiredTimeLast < ?))""");
-            selectExpired = conn.prepare("""
-                    SELECT fingerprint, trustProfile FROM Devices
-                    WHERE userId = ? AND verifiedTimeLast < ? AND deletionTime IS NULL
-                    AND retiredTime IS NULL AND pending = 0""");
-            updateExpired = conn.prepare(
-                    "UPDATE Devices SET expiredTimeLast = ? WHERE fingerprint = ?");
-            selectFailed = conn.prepare("""
-                    SELECT fingerprint, trustProfile, failureReason FROM Devices
-                    WHERE userId = ? AND failureTimeLast > coalesce(failureAlertTime, 0)
-                    AND trustProfile = 2 AND deletionTime IS NULL AND retiredTime IS NULL AND pending = 0""");
-            // Only profile 2 devices record failures, so profile 1 alerting is unchanged.
-            selectAccountsForFailureAlert = conn.prepare("""
-                    SELECT userId, username, alertDelay FROM Accounts
-                    WHERE EXISTS (SELECT 1 FROM Devices WHERE userId = Accounts.userId
-                        AND failureTimeLast > coalesce(failureAlertTime, 0) AND trustProfile = 2
-                        AND deletionTime IS NULL AND retiredTime IS NULL AND pending = 0)""");
-            updateFailureAlert = conn.prepare(
-                    "UPDATE Devices SET failureAlertTime = ? WHERE userId = ? AND trustProfile = 2");
-            selectPendingNotices = conn.prepare("""
-                    SELECT Devices.userId, username, fingerprint, hex(verifiedBootHash), pinnedOsVersion,
-                        pinnedOsPatchLevel, pinnedVendorPatchLevel, pinnedBootPatchLevel, verifiedTimeFirst,
-                        reviewFlags
-                    FROM Devices INNER JOIN Accounts ON Accounts.userId = Devices.userId
-                    WHERE pending = 1 AND pendingNoticeTime IS NULL AND deletionTime IS NULL""");
-            updatePendingNotice = conn.prepare(
-                    "UPDATE Devices SET pendingNoticeTime = ? WHERE fingerprint = ?");
-            selectRetireSuggestions = conn.prepare("""
-                    SELECT Devices.userId, username, fingerprint, trustProfile FROM Devices
-                    INNER JOIN Accounts ON Accounts.userId = Devices.userId
-                    WHERE retireSuggestedTime IS NULL AND\s""" + AttestationServer.RETIRE_SUGGESTED);
-            updateRetireSuggested = conn.prepare(
-                    "UPDATE Devices SET retireSuggestedTime = ? WHERE fingerprint = ?");
-            selectEmails = conn.prepare("SELECT address FROM EmailAddresses WHERE userId = ?");
+            prepare(conn);
         } catch (final SQLiteException e) {
             conn.dispose();
             logger.log(CRIT, "database error, cannot set up AlertDispatcher thread", e);
@@ -320,159 +286,224 @@ class AlertDispatcher implements Runnable {
                             });
                 }
 
-                final ArrayList<Account> accountsForExpiryAlert = new ArrayList<>();
-                final long now = System.currentTimeMillis();
-                try {
-                    selectAccountsForExpiryAlert.bind(1, now);
-                    selectAccountsForExpiryAlert.bind(2, now - ALERT_THROTTLE_MS);
-                    while (selectAccountsForExpiryAlert.step()) {
-                        accountsForExpiryAlert.add(new Account(
-                                selectAccountsForExpiryAlert.columnLong(0),
-                                selectAccountsForExpiryAlert.columnString(1),
-                                selectAccountsForExpiryAlert.columnInt(2)));
-                    }
-                } finally {
-                    selectAccountsForExpiryAlert.reset();
-                }
-
-                for (final Account account : accountsForExpiryAlert) {
-                    final ArrayList<byte[]> expiredFingerprints = new ArrayList<>();
-                    final StringBuilder expired = new StringBuilder();
-                    try {
-                        selectExpired.bind(1, account.userId);
-                        selectExpired.bind(2, now - account.alertDelay * 1000);
-                        while (selectExpired.step()) {
-                            final byte[] fingerprint = selectExpired.columnBlob(0);
-                            expiredFingerprints.add(fingerprint);
-                            appendFingerprint(expired, fingerprint, selectExpired.columnInt(1));
-                        }
-                    } finally {
-                        selectExpired.reset();
-                    }
-
-                    if (expiredFingerprints.isEmpty()) {
-                        continue;
-                    }
-
-                    final ArrayList<String> addresses = new ArrayList<>();
-                    try {
-                        selectEmails.bind(1, account.userId);
-                        while (selectEmails.step()) {
-                            addresses.add(selectEmails.columnString(0));
-                        }
-                    } finally {
-                        selectEmails.reset();
-                    }
-
-                    for (final String address : addresses) {
-                        logger.info("sending expiry email to " + address + " for account " + account.userId);
-                        try {
-                            final Message message = new MimeMessage(session);
-                            message.setFrom(new InternetAddress(emailFrom, EMAIL_DISPLAY_NAME));
-                            message.setRecipients(Message.RecipientType.TO,
-                                    InternetAddress.parse(address));
-                            message.setSubject(
-                                    "Devices failed to provide valid attestations within " +
-                                    account.alertDelay / 60 / 60 + " hours");
-                            message.setText("This is an alert for the account '" + account.username + "'.\n\n" +
-                                    "The following devices have failed to provide valid attestations before the expiry time:\n\n" +
-                                    expired + "\nLog in to https://" + AttestationServer.DOMAIN + "/ for more information.\n\n" +
-                                    "If you do not want to receive these alerts and cannot log in to the account,\nemail " + emailFrom + " from the address receiving the alerts.");
-
-                            Transport.send(message);
-
-                            for (final byte[] fingerprint : expiredFingerprints) {
-                                try {
-                                    updateExpired.bind(1, now);
-                                    updateExpired.bind(2, fingerprint);
-                                    updateExpired.step();
-                                } finally {
-                                    updateExpired.reset();
-                                }
-                            }
-                        } catch (final MessagingException | UnsupportedEncodingException e) {
-                            logger.log(Level.WARNING, "email error", e);
-                        }
-                    }
-                }
-
-                final ArrayList<Account> accountsForFailureAlert = new ArrayList<>();
-                try {
-                    while (selectAccountsForFailureAlert.step()) {
-                        accountsForFailureAlert.add(new Account(
-                                selectAccountsForFailureAlert.columnLong(0),
-                                selectAccountsForFailureAlert.columnString(1),
-                                selectAccountsForFailureAlert.columnInt(2)));
-                    }
-                } finally {
-                    selectAccountsForFailureAlert.reset();
-                }
-
-                for (final Account account : accountsForFailureAlert) {
-                    final StringBuilder failed = new StringBuilder();
-                    try {
-                        selectFailed.bind(1, account.userId);
-                        while (selectFailed.step()) {
-                            appendFingerprint(failed, selectFailed.columnBlob(0), selectFailed.columnInt(1));
-                            if (!selectFailed.columnNull(2)) {
-                                failed.append("  ").append(selectFailed.columnString(2)).append("\n");
-                            }
-                        }
-                    } finally {
-                        selectFailed.reset();
-                    }
-
-                    if (failed.length() == 0) {
-                        continue;
-                    }
-
-                    final ArrayList<String> addresses = new ArrayList<>();
-                    try {
-                        selectEmails.bind(1, account.userId);
-                        while (selectEmails.step()) {
-                            addresses.add(selectEmails.columnString(0));
-                        }
-                    } finally {
-                        selectEmails.reset();
-                    }
-
-                    for (final String address : addresses) {
-                        logger.info("sending failure email to " + address + " for account " + account.userId);
-                        try {
-                            final Message message = new MimeMessage(session);
-                            message.setFrom(new InternetAddress(emailFrom, EMAIL_DISPLAY_NAME));
-                            message.setRecipients(Message.RecipientType.TO,
-                                    InternetAddress.parse(address));
-                            message.setSubject("Devices provided invalid attestations");
-                            message.setText("This is an alert for the account '" + account.username + "'.\n\n" +
-                                    "The following devices have provided invalid attestations:\n\n" +
-                                    failed + "\nLog in to https://" + AttestationServer.DOMAIN + "/ for more information.\n\n" +
-                                    "If you do not want to receive these alerts and cannot log in to the account,\nemail " + emailFrom + " from the address receiving the alerts");
-
-                            Transport.send(message);
-                        } catch (final MessagingException | UnsupportedEncodingException e) {
-                            logger.log(Level.WARNING, "email error", e);
-                        }
-                    }
-
-                    try {
-                        updateFailureAlert.bind(1, now);
-                        updateFailureAlert.bind(2, account.userId);
-                        updateFailureAlert.step();
-                    } finally {
-                        updateFailureAlert.reset();
-                    }
-                }
-
-                sendPendingNotices(session, emailFrom, now, selectPendingNotices, updatePendingNotice,
-                        selectEmails);
-                sendRetireSuggestions(session, emailFrom, now, selectRetireSuggestions,
-                        updateRetireSuggested, selectEmails);
+                dispatch(session, emailFrom, System.currentTimeMillis());
             } catch (final SQLiteException e) {
                 logger.log(Level.WARNING, "database error", e);
             }
 
             logger.info("dispatching alerts completed");
         }
+    }
+
+    void prepare(final SQLiteConnection conn) throws SQLiteException {
+        selectConfiguration = conn.prepare("""
+                SELECT
+                (SELECT value FROM Configuration WHERE key = 'emailLocal'),
+                (SELECT value FROM Configuration WHERE key = 'emailUsername'),
+                (SELECT value FROM Configuration WHERE key = 'emailPassword'),
+                (SELECT value FROM Configuration WHERE key = 'emailHost'),
+                (SELECT value FROM Configuration WHERE key = 'emailPort'),
+                (SELECT value FROM Configuration WHERE key = 'emailFrom')""");
+        selectAccountsForExpiryAlert = conn.prepare("""
+                SELECT userId, username, alertDelay FROM Accounts
+                WHERE (SELECT 1 FROM Devices WHERE userId = Accounts.userID
+                    AND verifiedTimeLast < ? - alertDelay * 1000 AND deletionTime is NULL
+                    AND retiredTime IS NULL AND pending = 0
+                    AND (expiredTimeLast IS NULL OR expiredTimeLast < ?))""");
+        selectExpired = conn.prepare("""
+                SELECT fingerprint, trustProfile FROM Devices
+                WHERE userId = ? AND verifiedTimeLast < ? AND deletionTime IS NULL
+                AND retiredTime IS NULL AND pending = 0""");
+        updateExpired = conn.prepare(
+                "UPDATE Devices SET expiredTimeLast = ? WHERE fingerprint = ?");
+        selectFailed = conn.prepare("""
+                SELECT fingerprint, trustProfile, failureReason FROM Devices
+                WHERE userId = ? AND\s""" + FAILURE_ALERT_DUE);
+        // Only profile 2 devices record failures, so profile 1 alerting is unchanged.
+        selectAccountsForFailureAlert = conn.prepare("""
+                SELECT userId, username, alertDelay FROM Accounts
+                WHERE EXISTS (SELECT 1 FROM Devices WHERE userId = Accounts.userId AND\s""" +
+                FAILURE_ALERT_DUE + ")");
+        updateFailureAlert = conn.prepare(
+                "UPDATE Devices SET failureAlertTime = ?, failureAlertReason = ? WHERE fingerprint = ?");
+        selectPendingNotices = conn.prepare("""
+                SELECT Devices.userId, username, fingerprint, hex(verifiedBootHash), pinnedOsVersion,
+                    pinnedOsPatchLevel, pinnedVendorPatchLevel, pinnedBootPatchLevel, verifiedTimeFirst,
+                    reviewFlags
+                FROM Devices INNER JOIN Accounts ON Accounts.userId = Devices.userId
+                WHERE pending = 1 AND pendingNoticeTime IS NULL AND deletionTime IS NULL""");
+        updatePendingNotice = conn.prepare(
+                "UPDATE Devices SET pendingNoticeTime = ? WHERE fingerprint = ?");
+        selectRetireSuggestions = conn.prepare("""
+                SELECT Devices.userId, username, fingerprint, trustProfile FROM Devices
+                INNER JOIN Accounts ON Accounts.userId = Devices.userId
+                WHERE retireSuggestedTime IS NULL AND\s""" + AttestationServer.RETIRE_SUGGESTED);
+        updateRetireSuggested = conn.prepare(
+                "UPDATE Devices SET retireSuggestedTime = ? WHERE fingerprint = ?");
+        selectEmails = conn.prepare("SELECT address FROM EmailAddresses WHERE userId = ?");
+    }
+
+    // One round of alerts. Package-private for the tests.
+    void dispatch(final Session session, final String emailFrom, final long now) throws SQLiteException {
+        final ArrayList<Account> accountsForExpiryAlert = new ArrayList<>();
+        try {
+            selectAccountsForExpiryAlert.bind(1, now);
+            selectAccountsForExpiryAlert.bind(2, now - ALERT_THROTTLE_MS);
+            while (selectAccountsForExpiryAlert.step()) {
+                accountsForExpiryAlert.add(new Account(
+                        selectAccountsForExpiryAlert.columnLong(0),
+                        selectAccountsForExpiryAlert.columnString(1),
+                        selectAccountsForExpiryAlert.columnInt(2)));
+            }
+        } finally {
+            selectAccountsForExpiryAlert.reset();
+        }
+
+        for (final Account account : accountsForExpiryAlert) {
+            final ArrayList<byte[]> expiredFingerprints = new ArrayList<>();
+            final StringBuilder expired = new StringBuilder();
+            try {
+                selectExpired.bind(1, account.userId);
+                selectExpired.bind(2, now - account.alertDelay * 1000);
+                while (selectExpired.step()) {
+                    final byte[] fingerprint = selectExpired.columnBlob(0);
+                    expiredFingerprints.add(fingerprint);
+                    appendFingerprint(expired, fingerprint, selectExpired.columnInt(1));
+                }
+            } finally {
+                selectExpired.reset();
+            }
+
+            if (expiredFingerprints.isEmpty()) {
+                continue;
+            }
+
+            final ArrayList<String> addresses = new ArrayList<>();
+            try {
+                selectEmails.bind(1, account.userId);
+                while (selectEmails.step()) {
+                    addresses.add(selectEmails.columnString(0));
+                }
+            } finally {
+                selectEmails.reset();
+            }
+
+            for (final String address : addresses) {
+                logger.info("sending expiry email to " + address + " for account " + account.userId);
+                try {
+                    final Message message = new MimeMessage(session);
+                    message.setFrom(new InternetAddress(emailFrom, EMAIL_DISPLAY_NAME));
+                    message.setRecipients(Message.RecipientType.TO,
+                            InternetAddress.parse(address));
+                    message.setSubject(
+                            "Devices failed to provide valid attestations within " +
+                            account.alertDelay / 60 / 60 + " hours");
+                    message.setText("This is an alert for the account '" + account.username + "'.\n\n" +
+                            "The following devices have failed to provide valid attestations before the expiry time:\n\n" +
+                            expired + "\nLog in to https://" + AttestationServer.DOMAIN + "/ for more information.\n\n" +
+                            "If you do not want to receive these alerts and cannot log in to the account,\nemail " + emailFrom + " from the address receiving the alerts.");
+
+                    Transport.send(message);
+
+                    for (final byte[] fingerprint : expiredFingerprints) {
+                        try {
+                            updateExpired.bind(1, now);
+                            updateExpired.bind(2, fingerprint);
+                            updateExpired.step();
+                        } finally {
+                            updateExpired.reset();
+                        }
+                    }
+                } catch (final MessagingException | UnsupportedEncodingException e) {
+                    logger.log(Level.WARNING, "email error", e);
+                }
+            }
+        }
+
+        final ArrayList<Account> accountsForFailureAlert = new ArrayList<>();
+        try {
+            while (selectAccountsForFailureAlert.step()) {
+                accountsForFailureAlert.add(new Account(
+                        selectAccountsForFailureAlert.columnLong(0),
+                        selectAccountsForFailureAlert.columnString(1),
+                        selectAccountsForFailureAlert.columnInt(2)));
+            }
+        } finally {
+            selectAccountsForFailureAlert.reset();
+        }
+
+        record Failure(byte[] fingerprint, String reason) {}
+        for (final Account account : accountsForFailureAlert) {
+            final StringBuilder failed = new StringBuilder();
+            final ArrayList<Failure> failures = new ArrayList<>();
+            try {
+                selectFailed.bind(1, account.userId);
+                while (selectFailed.step()) {
+                    final Failure failure = new Failure(selectFailed.columnBlob(0),
+                            selectFailed.columnNull(2) ? null : selectFailed.columnString(2));
+                    failures.add(failure);
+                    appendFingerprint(failed, failure.fingerprint, selectFailed.columnInt(1));
+                    if (failure.reason != null) {
+                        failed.append("  ").append(failure.reason).append("\n");
+                    }
+                }
+            } finally {
+                selectFailed.reset();
+            }
+
+            if (failures.isEmpty()) {
+                continue;
+            }
+
+            final ArrayList<String> addresses = new ArrayList<>();
+            try {
+                selectEmails.bind(1, account.userId);
+                while (selectEmails.step()) {
+                    addresses.add(selectEmails.columnString(0));
+                }
+            } finally {
+                selectEmails.reset();
+            }
+
+            for (final String address : addresses) {
+                logger.info("sending failure email to " + address + " for account " + account.userId);
+                try {
+                    final Message message = new MimeMessage(session);
+                    message.setFrom(new InternetAddress(emailFrom, EMAIL_DISPLAY_NAME));
+                    message.setRecipients(Message.RecipientType.TO,
+                            InternetAddress.parse(address));
+                    message.setSubject("Devices provided invalid attestations");
+                    message.setText("This is an alert for the account '" + account.username + "'.\n\n" +
+                            "The following devices have provided invalid attestations:\n\n" +
+                            failed + "\nLog in to https://" + AttestationServer.DOMAIN + "/ for more information.\n\n" +
+                            "If you do not want to receive these alerts and cannot log in to the account,\nemail " + emailFrom + " from the address receiving the alerts");
+
+                    Transport.send(message);
+                } catch (final MessagingException | UnsupportedEncodingException e) {
+                    logger.log(Level.WARNING, "email error", e);
+                }
+            }
+
+            // Only the devices in this alert, with the reason they were alerted for.
+            for (final Failure failure : failures) {
+                try {
+                    updateFailureAlert.bind(1, now);
+                    if (failure.reason == null) {
+                        updateFailureAlert.bindNull(2);
+                    } else {
+                        updateFailureAlert.bind(2, failure.reason);
+                    }
+                    updateFailureAlert.bind(3, failure.fingerprint);
+                    updateFailureAlert.step();
+                } finally {
+                    updateFailureAlert.reset();
+                }
+            }
+        }
+
+        sendPendingNotices(session, emailFrom, now, selectPendingNotices, updatePendingNotice,
+                selectEmails);
+        sendRetireSuggestions(session, emailFrom, now, selectRetireSuggestions,
+                updateRetireSuggested, selectEmails);
     }
 }

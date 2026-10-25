@@ -31,6 +31,7 @@ public final class Profile2Test {
             throw new AssertionError("run from an empty working directory");
         }
         AttestationServer.setupAttestationDatabase();
+        require(userVersion() == 19 && hasColumn("failureAlertReason"), "new databases start at schema 19");
         trust = Profile2Fixture.trust();
         final long alice = account("alice");
         final long bob = account("bob");
@@ -171,6 +172,8 @@ public final class Profile2Test {
         verify(fourth.message(), bob, false, list1);
         require(!Profile2Handlers.rejectDevice(bob, fingerprint(phone)), "approved phones cannot be rejected");
 
+        failureAlerts(list1);
+        migration(list1);
         releaseListStore();
         challengeLimit();
         enrollLink();
@@ -352,6 +355,196 @@ public final class Profile2Test {
         buffer.position(buffer.position() + compressedLength);
         buffer.put(fingerprint(pinned));
         return buffer.array();
+    }
+
+    private static final long DAY = 24L * 60 * 60 * 1000;
+    private static final String FAILURE = "Devices provided invalid attestations";
+    private static final String EXPIRY = "Devices failed to provide valid attestations";
+    private static final String CAROL = "carol@example.invalid";
+    private static final String DAVE = "dave@example.invalid";
+    private static String lastAlert;
+
+    // A phone that keeps failing alerts once a day. Expiry alerts and profile 1 keep their rules.
+    private static void failureAlerts(final ReleaseList list) throws Exception {
+        final long carol = account("carol");
+        addEmail(carol, CAROL);
+        final Profile2Fixture phone = approved(carol, list);
+        final Profile2Fixture other = approved(carol, list);
+        final Profile2Fixture quiet = approved(carol, list);
+        final AlertDispatcher dispatcher = new AlertDispatcher();
+        dispatcher.prepare(AttestationServer.getLocalAttestationConn());
+
+        update("UPDATE Devices SET trustProfile = 1, failureTimeLast = 1, failureReason = 'x' WHERE fingerprint = ?",
+                other);
+        require(emails(dispatcher, CAROL, FAILURE, 0) == 0, "profile 1 device raises no failure alert");
+
+        failUnpublished(phone, carol, list);
+        require(emails(dispatcher, CAROL, FAILURE, 0) == 1, "first failure alerts");
+        require(column(quiet, "failureAlertTime") == 0 && column(other, "failureAlertTime") == 0,
+                "only the alerted device is marked");
+        failUnpublished(phone, carol, list);
+        require(emails(dispatcher, CAROL, FAILURE, 0) == 0, "same failure within a day is throttled");
+        require(emails(dispatcher, CAROL, FAILURE, DAY + 60000) == 0, "throttled failure raises no alert later");
+        // the alert and the last success a day back, so only the day passing can allow the next alert
+        exec("UPDATE Devices SET failureAlertTime = failureAlertTime - ? WHERE fingerprint = ?", DAY, fingerprint(phone));
+        setLastVerified(phone, column(phone, "failureAlertTime") - 1);
+        failUnpublished(phone, carol, list);
+        require(emails(dispatcher, CAROL, FAILURE, 0) == 1, "phone still failing a day after the alert alerts again");
+        failUnpublished(phone, carol, list);
+        require(emails(dispatcher, CAROL, FAILURE, 0) == 0, "and is throttled again");
+
+        succeed(phone, carol, list);
+        require(emails(dispatcher, CAROL, FAILURE, 0) == 0, "success raises no alert");
+        failUnpublished(phone, carol, list);
+        require(emails(dispatcher, CAROL, FAILURE, 0) == 1, "failure after a successful check alerts at once");
+
+        failUnlocked(phone, carol, list);
+        require(emails(dispatcher, CAROL, FAILURE, 0) == 1, "different reason alerts at once");
+        require(lastAlert.contains("device is not locked"), "alert names the new reason");
+        failUnlocked(phone, carol, list);
+        require(emails(dispatcher, CAROL, FAILURE, 0) == 0, "repeated new reason is throttled");
+        succeed(phone, carol, list);
+        require(emails(dispatcher, CAROL, FAILURE, DAY + 60000) == 0, "recovered phone gets no late alert");
+
+        final long failureAlert = column(phone, "failureAlertTime");
+        require(column(phone, "expiredTimeLast") == 0, "failure alerts leave expiry alone");
+        setLastVerified(phone, System.currentTimeMillis() - 49L * 60 * 60 * 1000);
+        require(emails(dispatcher, CAROL, EXPIRY, 0) == 1, "phone past its alert delay raises an expiry alert");
+        require(emails(dispatcher, CAROL, EXPIRY, 0) == 0, "expiry alert throttled");
+        exec("UPDATE Devices SET expiredTimeLast = expiredTimeLast - ? WHERE fingerprint = ?", DAY + 1,
+                fingerprint(phone));
+        require(emails(dispatcher, CAROL, EXPIRY, 0) == 1, "expiry alert again after a day");
+        require(column(phone, "failureAlertTime") == failureAlert, "expiry alerts leave failure alerts alone");
+        require(column(other, "expiredTimeLast") == 0, "checked phone raises no expiry alert");
+    }
+
+    // A schema 18 database gains the alerted reason, filled in where the last failure was alerted.
+    private static void migration(final ReleaseList list) throws Exception {
+        final long dave = account("dave");
+        final Profile2Fixture alerted = approved(dave, list);
+        final Profile2Fixture unalerted = approved(dave, list);
+        update("UPDATE Devices SET failureTimeLast = 100, failureAlertTime = 200, failureReason = 'old' " +
+                "WHERE fingerprint = ?", alerted);
+        update("UPDATE Devices SET failureTimeLast = 300, failureAlertTime = 200, failureReason = 'new' " +
+                "WHERE fingerprint = ?", unalerted);
+        final SQLiteConnection conn = AttestationServer.getLocalAttestationConn();
+        conn.exec("ALTER TABLE Devices DROP COLUMN failureAlertReason");
+        conn.exec("PRAGMA user_version = 18");
+        final long devices = count();
+        AttestationServer.setupAttestationDatabase();
+        require(userVersion() == 19 && hasColumn("failureAlertReason"), "schema 18 migrates to 19");
+        require(text(alerted, "failureAlertReason").equals("old"), "alerted reason filled in");
+        require(text(unalerted, "failureAlertReason").isEmpty(), "unalerted failure still alerts");
+        require(count() == devices, "migration keeps every device");
+        addEmail(dave, DAVE);
+        final AlertDispatcher dispatcher = new AlertDispatcher();
+        dispatcher.prepare(AttestationServer.getLocalAttestationConn());
+        require(emails(dispatcher, DAVE, FAILURE, 0) == 1 && lastAlert.contains("  new\n")
+                && !lastAlert.contains("  old\n"), "after the migration only the unalerted failure alerts");
+    }
+
+    private static void addEmail(final long userId, final String address) throws Exception {
+        final SQLiteStatement insert = AttestationServer.getLocalAttestationConn().prepare(
+                "INSERT INTO EmailAddresses (userId, address) VALUES (?, ?)");
+        try {
+            insert.bind(1, userId);
+            insert.bind(2, address);
+            insert.step();
+        } finally {
+            insert.dispose();
+        }
+    }
+
+    private static Profile2Fixture approved(final long userId, final ReleaseList list) throws Exception {
+        final Profile2Fixture fixture = new Profile2Fixture();
+        fixture.challenge = challenge(userId, 1000);
+        verify(fixture.message(), userId, false, list);
+        require(Profile2Handlers.approveDevice(userId, fingerprint(fixture)), "phone approved");
+        return fixture;
+    }
+
+    private static void succeed(final Profile2Fixture phone, final long userId, final ReleaseList list)
+            throws Exception {
+        Thread.sleep(2);
+        phone.nextCheck(challenge(-1, 0));
+        verify(phone.message(), userId, true, list);
+    }
+
+    private static void failUnpublished(final Profile2Fixture phone, final long userId, final ReleaseList list)
+            throws Exception {
+        Thread.sleep(2);
+        final byte[] published = phone.bootHash;
+        phone.nextCheck(challenge(-1, 0));
+        phone.bootHash = Profile2Fixture.sha256("unpublished");
+        rejected("not an official release", () -> verify(phone.message(), userId, true, list));
+        phone.bootHash = published;
+    }
+
+    private static void failUnlocked(final Profile2Fixture phone, final long userId, final ReleaseList list)
+            throws Exception {
+        Thread.sleep(2);
+        phone.nextCheck(challenge(-1, 0));
+        phone.locked = false;
+        rejected("not locked", () -> verify(phone.message(), userId, true, list));
+        phone.locked = true;
+    }
+
+    // Runs one round of alerts, offset from now, and counts the emails to one address with this subject.
+    // A round ahead of now also runs the other alerts for every account, for example retire suggestions.
+    private static int emails(final AlertDispatcher dispatcher, final String address, final String subject,
+            final long later) throws Exception {
+        RecordingTransport.sent.clear();
+        dispatcher.dispatch(RecordingTransport.session(), "alerts@example.invalid",
+                System.currentTimeMillis() + later);
+        Thread.sleep(2);
+        int count = 0;
+        for (final jakarta.mail.Message message : RecordingTransport.sent) {
+            if (message.getSubject().startsWith(subject)
+                    && message.getAllRecipients()[0].toString().equals(address)) {
+                count++;
+                lastAlert = (String) message.getContent();
+            }
+        }
+        return count;
+    }
+
+    private static void update(final String sql, final Profile2Fixture fixture) throws Exception {
+        final SQLiteStatement update = AttestationServer.getLocalAttestationConn().prepare(sql);
+        try {
+            update.bind(1, fingerprint(fixture));
+            update.step();
+        } finally {
+            update.dispose();
+        }
+    }
+
+    private static long scalar(final String sql) throws Exception {
+        final SQLiteStatement select = AttestationServer.getLocalAttestationConn().prepare(sql);
+        try {
+            select.step();
+            return select.columnLong(0);
+        } finally {
+            select.dispose();
+        }
+    }
+
+    private static long userVersion() throws Exception {
+        return scalar("PRAGMA user_version");
+    }
+
+    private static long count() throws Exception {
+        return scalar("SELECT count(*) FROM Devices");
+    }
+
+    private static boolean hasColumn(final String column) throws Exception {
+        final SQLiteStatement select = AttestationServer.getLocalAttestationConn().prepare(
+                "SELECT 1 FROM pragma_table_info('Devices') WHERE name = ?");
+        try {
+            select.bind(1, column);
+            return select.step();
+        } finally {
+            select.dispose();
+        }
     }
 
     private static void releaseListStore() throws Exception {
