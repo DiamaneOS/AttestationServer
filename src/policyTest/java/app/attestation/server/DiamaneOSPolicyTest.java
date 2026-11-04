@@ -1,6 +1,11 @@
 package app.attestation.server;
 
 import java.security.GeneralSecurityException;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.logging.Handler;
+import java.util.logging.LogRecord;
+import java.util.logging.Logger;
 
 /** Focused regressions for the downstream trust boundaries, without hardware claims. */
 public final class DiamaneOSPolicyTest {
@@ -39,7 +44,40 @@ public final class DiamaneOSPolicyTest {
                 // Rejection is the security boundary under test.
             }
         }
+        operationalLog();
         System.out.println("DiamaneOS trust-policy regressions passed; no device attestation is claimed.");
+    }
+
+    // Failures that stop alerts reach the journal, rate limited and without identifiers.
+    private static void operationalLog() {
+        final List<LogRecord> records = new ArrayList<>();
+        final Logger logger = Logger.getLogger("app.attestation");
+        logger.setUseParentHandlers(false);
+        logger.addHandler(new Handler() {
+            @Override
+            public void publish(final LogRecord record) {
+                records.add(record);
+            }
+
+            @Override
+            public void flush() {}
+
+            @Override
+            public void close() {}
+        });
+        final Exception failure = new Exception("mail to someone@example.org",
+                new java.net.SocketTimeoutException("host mail.example.org"));
+        OperationalLog.report("test failure", failure, 1000);
+        OperationalLog.report("test failure", failure, 1000 + OperationalLog.INTERVAL_MS - 1);
+        require(records.size() == 1, "a repeated failure must wait for the interval");
+        require(records.get(0).getLevel() == SyslogLevel.CRIT, "the line must pass the CRIT filter");
+        require(records.get(0).getThrown() == null, "a stack trace can hold an address");
+        require(!records.get(0).getMessage().contains("example.org"), "the line must hold no identifiers");
+        require(records.get(0).getMessage().contains("java.net.SocketTimeoutException"), "the line must name the cause");
+        OperationalLog.report("test failure", failure, 1000 + OperationalLog.INTERVAL_MS);
+        require(records.size() == 2, "a failure that lasts must show again");
+        OperationalLog.report("other failure", null, 1000);
+        require(records.size() == 3, "another failure must show at once");
     }
 
     private static void require(final boolean condition, final String message) {

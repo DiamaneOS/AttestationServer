@@ -81,6 +81,7 @@ final class ReleaseListStore {
             // no release list published yet
         } catch (final GeneralSecurityException | IOException | SQLiteException e) {
             logger.log(Level.WARNING, "ignoring release list " + path, e);
+            OperationalLog.report("release list rejected", e);
         }
     }
 

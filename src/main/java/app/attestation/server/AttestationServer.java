@@ -1735,6 +1735,7 @@ class AttestationServer {
                 AttestationProtocol.verifySerialized(attestationResult, pendingChallenges, userId, subscribeKey == null);
             } catch (final Profile2.ReleaseListUnavailableException e) {
                 logger.log(Level.SEVERE, "no release list loaded", e);
+                OperationalLog.report("no release list loaded", null);
                 exchange.sendResponseHeaders(503, -1);
                 return;
             } catch (final BufferUnderflowException | NegativeArraySizeException |
