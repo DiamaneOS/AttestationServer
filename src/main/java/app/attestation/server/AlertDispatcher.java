@@ -104,6 +104,7 @@ class AlertDispatcher implements Runnable {
                     Transport.send(message);
                 } catch (final MessagingException | UnsupportedEncodingException e) {
                     logger.log(Level.WARNING, "email error", e);
+                    OperationalLog.report("alert email not sent", e);
                 }
             }
             try {
@@ -164,6 +165,7 @@ class AlertDispatcher implements Runnable {
                     Transport.send(message);
                 } catch (final MessagingException | UnsupportedEncodingException e) {
                     logger.log(Level.WARNING, "email error", e);
+                    OperationalLog.report("alert email not sent", e);
                 }
             }
         }
@@ -252,6 +254,7 @@ class AlertDispatcher implements Runnable {
                 if (emailLocal == 1) {
                     if (emailFrom == null) {
                         logger.warning("missing configuration for sending alert emails");
+                        OperationalLog.report("alert email configuration missing", null);
                         continue;
                     }
                     final Properties props = new Properties();
@@ -263,6 +266,7 @@ class AlertDispatcher implements Runnable {
                 } else {
                     if (emailUsername == null || emailPassword == null || emailHost == null || emailPort == null || emailFrom == null) {
                         logger.warning("missing configuration for sending alert emails");
+                        OperationalLog.report("alert email configuration missing", null);
                         continue;
                     }
 
@@ -289,6 +293,7 @@ class AlertDispatcher implements Runnable {
                 dispatch(session, emailFrom, System.currentTimeMillis());
             } catch (final SQLiteException e) {
                 logger.log(Level.WARNING, "database error", e);
+                OperationalLog.report("alerts not dispatched", e);
             }
 
             logger.info("dispatching alerts completed");
@@ -416,6 +421,7 @@ class AlertDispatcher implements Runnable {
                     }
                 } catch (final MessagingException | UnsupportedEncodingException e) {
                     logger.log(Level.WARNING, "email error", e);
+                    OperationalLog.report("alert email not sent", e);
                 }
             }
         }
@@ -481,6 +487,7 @@ class AlertDispatcher implements Runnable {
                     Transport.send(message);
                 } catch (final MessagingException | UnsupportedEncodingException e) {
                     logger.log(Level.WARNING, "email error", e);
+                    OperationalLog.report("alert email not sent", e);
                 }
             }
 
