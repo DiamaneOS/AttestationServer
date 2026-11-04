@@ -27,6 +27,8 @@ Device details and trusted keys are in `src/main/resources/app/attestation/serve
 
 The release pipeline places the signed list in the working directory as `releases.json`, or at `-Ddiamaneos.releases=<file>`. A list that fails verification or has a lower sequence than an accepted one is ignored.
 
+The account page's Add this phone link carries the account, so a site could make its own. Auditor therefore takes that link only with a one-time code it put in the page's address itself. Without the code it opens the account page instead.
+
 When a device stops checking in after a newer device joined the same account, the web interface and an email ask whether the old phone was reset.
 
 Retiring it is one explicit action by the logged-in account holder. The record and its history stay, alerts stop and its checks are refused.
