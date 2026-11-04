@@ -164,7 +164,14 @@ function oemUnlockAllowedString(oemUnlockAllowed2) {
     throw new Error("Invalid oem unlock allowed value");
 }
 
-// The account page opens Auditor on the phone itself with the same data as the QR code.
+// The account page opens Auditor on the phone itself with the same data as the QR code. Auditor
+// accepts that only with the one-time code it put in this page's address, which another site
+// cannot read.
+function enrollLinkWithCode(link) {
+    const code = /^#add-this-phone=([0-9a-f]{32})$/.exec(location.hash);
+    return code === null ? link : link.replace("#Intent;", "&code=" + code[1] + "#Intent;");
+}
+
 function reloadEnrollLink() {
     addThisPhone.hidden = true;
     addThisPhoneHint.hidden = true;
@@ -178,11 +185,17 @@ function reloadEnrollLink() {
         }
         return response.json();
     }).then(result => {
+        const link = enrollLinkWithCode(result.link);
         addThisPhone.onclick = () => {
-            location.href = result.link;
+            location.href = link;
         };
         addThisPhone.innerText = "Add this phone to account number " + result.userId;
         addThisPhone.hidden = false;
+        if (link !== result.link) {
+            addThisPhoneHint.innerText = "Auditor sent you back here. Tap once more to confirm.";
+            addThisPhoneHint.hidden = false;
+            addThisPhone.scrollIntoView();
+        }
     }).catch(error => {
         console.log(error);
     });
