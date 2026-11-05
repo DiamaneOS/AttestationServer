@@ -466,6 +466,15 @@ public final class Profile2Test {
         rejected("malformed key attestation extension",
                 () -> verify(malformed.message(), userId, false, list));
         require(!exists(malformed), "malformed report stores nothing");
+
+        final Profile2Fixture phone = approved(userId, list);
+        for (final long version : new long[]{1L << 33, Long.MIN_VALUE + phone.appVersion}) {
+            clearFailure(phone);
+            phone.nextCheck(challenge(-1, 0));
+            phone.appVersion = version;
+            rejected("app version out of range", () -> verify(phone.message(), userId, true, list));
+            require(column(phone, "failureTimeLast") > 0, "authenticated report with a bad app version alerts");
+        }
     }
 
     private static Profile2Fixture approved(final long userId, final ReleaseList list) throws Exception {
