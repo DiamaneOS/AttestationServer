@@ -578,7 +578,10 @@ class AttestationProtocol {
         } else {
             throw new GeneralSecurityException("invalid Auditor app package name: " + packageName);
         }
-        final int appVersion = Math.toIntExact(info.version); // int for compatibility
+        if (info.version != (int) info.version) {
+            throw new GeneralSecurityException("Auditor app version out of range: " + info.version);
+        }
+        final int appVersion = (int) info.version; // int for compatibility
         if (appVersion < AUDITOR_APP_MINIMUM_VERSION) {
             throw new GeneralSecurityException("Auditor app is too old: " + appVersion);
         }
