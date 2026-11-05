@@ -46,6 +46,7 @@ import java.security.MessageDigest;
 import java.util.Base64;
 import java.util.EnumMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ThreadPoolExecutor;
@@ -1207,9 +1208,16 @@ class AttestationServer {
                     return;
                 }
                 try {
-                    new InternetAddress(email).validate();
+                    final InternetAddress address = new InternetAddress(email);
+                    address.validate();
+                    // a group sends alerts to every member and hides them from the blacklist
+                    if (address.isGroup()) {
+                        exchange.sendResponseHeaders(400, -1);
+                        return;
+                    }
+                    final String mailbox = address.getAddress().toLowerCase(Locale.ROOT);
                     for (final String emailBlacklistPattern : emailBlacklistPatterns) {
-                        if (email.matches(emailBlacklistPattern)) {
+                        if (mailbox.matches(emailBlacklistPattern)) {
                             exchange.sendResponseHeaders(400, -1);
                             return;
                         }

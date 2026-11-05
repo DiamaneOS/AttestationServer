@@ -33,6 +33,8 @@ When a device stops checking in after a newer device joined the same account, th
 
 Retiring it is one explicit action by the logged-in account holder. The record and its history stay, alerts stop and its checks are refused.
 
+An alert address must be one ASCII mailbox, since alerts are sent without SMTPUTF8 and to one recipient. Addresses already stored stay as they are.
+
 The database retains accounts, device pairing information, verification history and optional alert addresses. Retention behavior is implemented in [Maintenance.java](src/main/java/app/attestation/server/Maintenance.java).
 
 The [Debian deployment](https://github.com/DiamaneOS/infrastructure/tree/main/debian) separates root-owned code from application-writable encrypted state. The service account has no login or deployment permissions. `nginx/service-state.conf` controls public enrollment.

@@ -519,6 +519,19 @@ public final class Profile2Test {
                 configuration.formatted("alice@example.\u4e2d\u56fd")) == 400, "non-ASCII domain refused");
         require(request("ConfigurationHandler", "/api/configuration", session, null,
                 configuration.formatted("alice@example.com")) == 200, "ASCII address accepted");
+
+        // one mailbox, checked against the blacklist as alerts would address it
+        final var patterns = AttestationServer.class.getDeclaredField("emailBlacklistPatterns");
+        patterns.setAccessible(true);
+        // the first alternative of each group in the first pattern
+        final String blocked = ((String[]) patterns.get(null))[0].replaceAll("\\(([^|)]*)[^)]*\\)", "$1");
+        for (final String address : new String[]{"g: alice@example.com, bob@example.com;", "g: " + blocked + ";",
+                "Name <" + blocked + ">", blocked.toUpperCase(java.util.Locale.ROOT)}) {
+            require(request("ConfigurationHandler", "/api/configuration", session, null,
+                    configuration.formatted(address)) == 400, "alert address refused: " + address);
+        }
+        require(request("ConfigurationHandler", "/api/configuration", session, null,
+                configuration.formatted("Alice <alice@example.com>")) == 200, "address with a name accepted");
     }
 
     // Calls a handler directly, as the HTTP server would for a same-origin request.
