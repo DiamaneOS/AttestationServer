@@ -467,6 +467,12 @@ public final class Profile2Test {
                 () -> verify(malformed.message(), userId, false, list));
         require(!exists(malformed), "malformed report stores nothing");
 
+        final Profile2Fixture empty = new Profile2Fixture();
+        empty.challenge = challenge(userId, 1000);
+        empty.message();
+        rejected("empty certificate chain", () -> verify(empty.serialize(AttestationProtocol.encodeChain(
+                AttestationProtocol.DEFLATE_DICTIONARY_5, new Certificate[0])), userId, false, list));
+
         final Profile2Fixture phone = approved(userId, list);
         for (final long version : new long[]{1L << 33, Long.MIN_VALUE + phone.appVersion}) {
             clearFailure(phone);
