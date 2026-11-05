@@ -530,6 +530,16 @@ public final class Profile2Test {
             require(request("ConfigurationHandler", "/api/configuration", session, null,
                     configuration.formatted(address)) == 400, "alert address refused: " + address);
         }
+        for (final String address : new String[]{"hello@diamaneos.de", "ATTESTATION@diamaneos.de",
+                "security@diamaneos.de", "postmaster@diamaneos.de"}) {
+            require(request("ConfigurationHandler", "/api/configuration", session, null,
+                    configuration.formatted(address)) == 400, "project mailbox refused: " + address);
+        }
+        for (final String address : new String[]{"hello2@diamaneos.de", "ahello@diamaneos.de",
+                "hello@diamaneos.de.example.com", "hello@diamaneosxde", "contact@diamaneos.de"}) {
+            require(request("ConfigurationHandler", "/api/configuration", session, null,
+                    configuration.formatted(address)) == 200, "other address accepted: " + address);
+        }
         require(request("ConfigurationHandler", "/api/configuration", session, null,
                 configuration.formatted("Alice <alice@example.com>")) == 200, "address with a name accepted");
     }
