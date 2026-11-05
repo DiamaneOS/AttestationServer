@@ -92,7 +92,11 @@ final class Profile2Fixture {
             persistentCertificate = leaf;
         }
         final Certificate[] chain = {leaf, attestCertificate, rootCertificate};
-        final byte[] compressed = AttestationProtocol.encodeChain(AttestationProtocol.DEFLATE_DICTIONARY_5, chain);
+        return serialize(AttestationProtocol.encodeChain(AttestationProtocol.DEFLATE_DICTIONARY_5, chain));
+    }
+
+    // A message around an already compressed chain, signed with the persistent key.
+    byte[] serialize(final byte[] compressed) throws Exception {
         final ByteBuffer buffer = ByteBuffer.allocate(AttestationProtocol.MAX_MESSAGE_SIZE);
         buffer.put(AttestationProtocol.PROTOCOL_VERSION);
         buffer.putShort((short) compressed.length);
