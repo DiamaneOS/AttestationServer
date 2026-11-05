@@ -178,6 +178,7 @@ public final class Profile2Test {
         challengeLimit();
         enrollLink();
         malformedReports(alice, list1);
+        malformedRequests(alice);
         System.out.println("Profile 2 server tests: " + passed + " checks passed (software fixtures, no hardware claim).");
     }
 
@@ -481,6 +482,59 @@ public final class Profile2Test {
             rejected("app version out of range", () -> verify(phone.message(), userId, true, list));
             require(column(phone, "failureTimeLast") > 0, "authenticated report with a bad app version alerts");
         }
+    }
+
+    // Requests a fuzzer found answered with 500. Each is refused with 400 or 403 and changes nothing.
+    private static void malformedRequests(final long userId) throws Exception {
+        final byte[] token = AttestationProtocol.generateRandomToken();
+        final SQLiteStatement insert = AttestationServer.getLocalAttestationConn().prepare(
+                "INSERT INTO Sessions (userId, token, expiryTime) VALUES (?, ?, ?)");
+        try {
+            insert.bind(1, userId).bind(2, token).bind(3, Long.MAX_VALUE);
+            insert.step();
+        } finally {
+            insert.dispose();
+        }
+        final String session = "__Host-Http-session=" + AttestationServer.getLocalAttestationConn().getLastInsertId()
+                + "|" + java.util.Base64.getEncoder().encodeToString(token);
+
+        for (final String cookie : new String[]{"__Host-Http-session=x|y", "__Host-Http-session=1|*"}) {
+            require(request("AccountHandler", "/api/account", cookie, null, "{}") == 403,
+                    "malformed session cookie refused: " + cookie);
+        }
+        for (final String authorization : new String[]{"Auditor x", "Auditor " + userId + " *"}) {
+            require(request("VerifyHandler", "/auditor/verify", null, authorization, "") == 400,
+                    "malformed Auditor header refused: " + authorization);
+        }
+        require(request("AttestationHistoryHandler", "/api/attestation-history.json", session, null,
+                "{\"fingerprint\": \"ABC\", \"offsetId\": 1}") == 400, "malformed fingerprint refused in history");
+        require(request("DeleteDeviceHandler", "/api/delete-device", session, null,
+                "{\"fingerprint\": \"XYZ\"}") == 400, "malformed fingerprint refused in deletion");
+    }
+
+    // Calls a handler directly, as the HTTP server would for a same-origin request.
+    private static int request(final String handler, final String path, final String cookie,
+            final String authorization, final String body) throws Exception {
+        final var constructor = Class.forName("app.attestation.server.AttestationServer$" + handler)
+                .getDeclaredConstructor();
+        constructor.setAccessible(true);
+        final FakeExchange exchange = new FakeExchange("POST", path, java.net.URI.create(path),
+                body.getBytes(StandardCharsets.UTF_8));
+        if (!path.startsWith("/auditor/")) {
+            exchange.header("Origin", "https://" + AttestationServer.DOMAIN);
+            exchange.header("Content-Type", "application/json");
+            exchange.header("Sec-Fetch-Mode", "same-origin");
+            exchange.header("Sec-Fetch-Site", "same-origin");
+            exchange.header("Sec-Fetch-Dest", "empty");
+        }
+        if (cookie != null) {
+            exchange.header("Cookie", cookie);
+        }
+        if (authorization != null) {
+            exchange.header("Authorization", authorization);
+        }
+        ((com.sun.net.httpserver.HttpHandler) constructor.newInstance()).handle(exchange);
+        return exchange.status;
     }
 
     private static Profile2Fixture approved(final long userId, final ReleaseList list) throws Exception {
