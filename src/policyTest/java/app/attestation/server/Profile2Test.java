@@ -510,6 +510,15 @@ public final class Profile2Test {
                 "{\"fingerprint\": \"ABC\", \"offsetId\": 1}") == 400, "malformed fingerprint refused in history");
         require(request("DeleteDeviceHandler", "/api/delete-device", session, null,
                 "{\"fingerprint\": \"XYZ\"}") == 400, "malformed fingerprint refused in deletion");
+
+        // alerts go out without SMTPUTF8, so an address must be ASCII
+        final String configuration = "{\"verifyInterval\": 21600, \"alertDelay\": 172800, \"email\": \"%s\"}";
+        require(request("ConfigurationHandler", "/api/configuration", session, null,
+                configuration.formatted("al\u00efce@example.com")) == 400, "non-ASCII address refused");
+        require(request("ConfigurationHandler", "/api/configuration", session, null,
+                configuration.formatted("alice@example.\u4e2d\u56fd")) == 400, "non-ASCII domain refused");
+        require(request("ConfigurationHandler", "/api/configuration", session, null,
+                configuration.formatted("alice@example.com")) == 200, "ASCII address accepted");
     }
 
     // Calls a handler directly, as the HTTP server would for a same-origin request.

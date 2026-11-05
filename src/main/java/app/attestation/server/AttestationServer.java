@@ -1201,6 +1201,11 @@ class AttestationServer {
             }
 
             if (!email.isEmpty()) {
+                // alerts are sent without SMTPUTF8, which only an ASCII address can do without
+                if (!StandardCharsets.US_ASCII.newEncoder().canEncode(email)) {
+                    exchange.sendResponseHeaders(400, -1);
+                    return;
+                }
                 try {
                     new InternetAddress(email).validate();
                     for (final String emailBlacklistPattern : emailBlacklistPatterns) {
