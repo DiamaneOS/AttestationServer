@@ -89,7 +89,8 @@ class AttestationServer {
     // This should be moved to a table in the database so that it can be modified dynamically
     // without modifying the source code.
     private static final String[] emailBlacklistPatterns = {
-        "(contact|security|webmaster)@(attestation.app|grapheneos.org|seamlessupdate.app)"
+        "(contact|security|webmaster)@(attestation.app|grapheneos.org|seamlessupdate.app)",
+        "(hello|attestation|security|postmaster)@diamaneos\\.de"
     };
 
     private static final Cache<ByteBuffer, AttestationProtocol.PendingChallenge> pendingChallenges = Caffeine.newBuilder()
