@@ -17,6 +17,8 @@ const logout = document.getElementById("logout");
 const logoutEverywhere = document.getElementById("logout_everywhere");
 const changePasswordForm = document.getElementById("change_password_form");
 const configuration = document.getElementById("configuration");
+const configurationError = create("p", "", undefined, true);
+configuration.appendChild(configurationError);
 const devices = document.getElementById("devices");
 const qr = document.getElementById("qr");
 const rotate = document.getElementById("rotate");
@@ -701,6 +703,7 @@ for (const logoutButton of document.getElementsByClassName("logout")) {
             accountContent.hidden = true;
             username.innerText = null;
             configuration.reset();
+            configurationError.hidden = true;
             qr.src = "/placeholder.gif";
             qr.alt = "";
             loggedInButtons.hidden = true;
@@ -793,6 +796,7 @@ configuration.onsubmit = event => {
         return;
     }
 
+    configurationError.hidden = true;
     configuration.submit.disabled = true;
     const data = JSON.stringify({
         "verifyInterval": verifyInterval * 60 * 60,
@@ -809,6 +813,10 @@ configuration.onsubmit = event => {
     }).catch(error => {
         configuration.submit.disabled = false;
         console.log(error);
+        configurationError.innerText = error.message === "400"
+            ? "Configuration not saved: this alert email is not accepted."
+            : "Failed to set configuration.";
+        configurationError.hidden = false;
     });
 };
 
