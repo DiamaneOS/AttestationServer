@@ -1047,8 +1047,16 @@ class AttestationServer {
             exchange.sendResponseHeaders(403, -1);
             return null;
         }
-        final long sessionId = Long.parseLong(session[0]);
-        final byte[] token = Base64.getDecoder().decode(session[1]);
+        final long sessionId;
+        final byte[] token;
+        try {
+            sessionId = Long.parseLong(session[0]);
+            token = Base64.getDecoder().decode(session[1]);
+        } catch (final IllegalArgumentException e) {
+            purgeSessionCookie(exchange);
+            exchange.sendResponseHeaders(403, -1);
+            return null;
+        }
 
         final SQLiteConnection conn = getLocalAttestationConn();
         final SQLiteStatement select = conn.prepare("""
@@ -1269,13 +1277,20 @@ class AttestationServer {
                 return;
             }
 
+            final byte[] fingerprintBytes;
+            try {
+                fingerprintBytes = BaseEncoding.base16().decode(fingerprint);
+            } catch (final IllegalArgumentException e) {
+                exchange.sendResponseHeaders(400, -1);
+                return;
+            }
             final SQLiteConnection conn = getLocalAttestationConn();
             final SQLiteStatement update = conn.prepare(
                     "UPDATE Devices SET deletionTime = ? WHERE userId = ? AND fingerprint = ?");
             try {
                 update.bind(1, System.currentTimeMillis());
                 update.bind(2, account.userId);
-                update.bind(3, BaseEncoding.base16().decode(fingerprint));
+                update.bind(3, fingerprintBytes);
                 update.step();
             } finally {
                 update.dispose();
@@ -1491,7 +1506,7 @@ class AttestationServer {
                     return;
                 }
                 writeAttestationHistoryJson(exchange, fingerprint, account, offsetId);
-            } catch (final ClassCastException | JsonException | NullPointerException | NumberFormatException | GeneralSecurityException e) {
+            } catch (final ClassCastException | JsonException | NullPointerException | IllegalArgumentException | GeneralSecurityException e) {
                 logger.log(Level.WARNING, "invalid request", e);
                 exchange.sendResponseHeaders(400, -1);
             }
@@ -1689,8 +1704,15 @@ class AttestationServer {
                 exchange.sendResponseHeaders(400, -1);
                 return;
             }
-            final long userId = Long.parseLong(tokens[1]);
-            final String subscribeKey = tokens.length == 3 ? tokens[2] : null;
+            final long userId;
+            final byte[] subscribeKey;
+            try {
+                userId = Long.parseLong(tokens[1]);
+                subscribeKey = tokens.length == 3 ? BaseEncoding.base64().decode(tokens[2]) : null;
+            } catch (final IllegalArgumentException e) {
+                exchange.sendResponseHeaders(400, -1);
+                return;
+            }
 
             final byte[] currentSubscribeKey;
             final int verifyInterval;
@@ -1709,8 +1731,7 @@ class AttestationServer {
                 select.dispose();
             }
 
-            if (subscribeKey != null && !MessageDigest.isEqual(BaseEncoding.base64().decode(subscribeKey),
-                    currentSubscribeKey)) {
+            if (subscribeKey != null && !MessageDigest.isEqual(subscribeKey, currentSubscribeKey)) {
                 exchange.sendResponseHeaders(400, -1);
                 return;
             }
