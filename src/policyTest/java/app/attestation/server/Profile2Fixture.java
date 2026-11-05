@@ -69,6 +69,8 @@ final class Profile2Fixture {
     String packageName = "de.diamaneos.auditor";
     long appVersion = 9202;
     byte[] signer = AUDITOR_SIGNER;
+    // when set, the leaf carries these bytes as its attestation extension
+    byte[] leafKeyDescription;
     private Certificate attestCertificate;
     private Certificate rootCertificate;
 
@@ -80,12 +82,12 @@ final class Profile2Fixture {
             rootCertificate = certificate(root, name, root, null, KeyUsage.keyCertSign);
             attestCertificate = certificate(attest, name, root,
                     extension(Set.of(AuthorizationList.OperationPurpose.ATTEST_KEY),
-                            attestChallenge != null ? attestChallenge : challenge, tee), KeyUsage.keyCertSign);
+                            attestChallenge != null ? attestChallenge : challenge, tee).getEncoded(), KeyUsage.keyCertSign);
         }
         final KeyPair leafKey = fresh != null ? fresh : persistent;
-        final Certificate leaf = certificate(leafKey, name, attest,
-                extension(Set.of(AuthorizationList.OperationPurpose.SIGN, AuthorizationList.OperationPurpose.VERIFY),
-                        challenge, tee), KeyUsage.digitalSignature);
+        final Certificate leaf = certificate(leafKey, name, attest, leafKeyDescription != null ? leafKeyDescription
+                : extension(Set.of(AuthorizationList.OperationPurpose.SIGN, AuthorizationList.OperationPurpose.VERIFY),
+                        challenge, tee).getEncoded(), KeyUsage.digitalSignature);
         if (fresh == null) {
             persistentCertificate = leaf;
         }
@@ -142,7 +144,7 @@ final class Profile2Fixture {
     }
 
     private static Certificate certificate(final KeyPair subject, final X500Name name, final KeyPair signer,
-            final DERSequence keyDescription, final int keyUsage) throws Exception {
+            final byte[] keyDescription, final int keyUsage) throws Exception {
         final AlgorithmIdentifier ecdsa = new AlgorithmIdentifier(new ASN1ObjectIdentifier("1.2.840.10045.4.3.2"));
         final V3TBSCertificateGenerator generator = new V3TBSCertificateGenerator();
         generator.setSerialNumber(new ASN1Integer(1));
@@ -156,7 +158,7 @@ final class Profile2Fixture {
         extensions.add(new Extension(Extension.keyUsage, true, new KeyUsage(keyUsage).getEncoded()));
         if (keyDescription != null) {
             extensions.add(new Extension(new ASN1ObjectIdentifier(Profile2.KEY_DESCRIPTION_OID), false,
-                    new DEROctetString(keyDescription.getEncoded())));
+                    new DEROctetString(keyDescription)));
         }
         generator.setExtensions(new Extensions(extensions.toArray(new Extension[0])));
         final TBSCertificate tbs = generator.generateTBSCertificate();

@@ -115,8 +115,13 @@ public class ParsedAttestationRecord {
     for (int i = certs.size() - 1; i >= 0; i--) {
       byte[] attestationExtensionBytes = certs.get(i).getExtensionValue(KEY_DESCRIPTION_OID);
       if (attestationExtensionBytes != null && attestationExtensionBytes.length != 0) {
-        return new ParsedAttestationRecord(
-            extractAttestationSequence(attestationExtensionBytes), certs.get(i).getPublicKey());
+        // the decoders below signal unexpected structure with unchecked exceptions
+        try {
+          return new ParsedAttestationRecord(
+              extractAttestationSequence(attestationExtensionBytes), certs.get(i).getPublicKey());
+        } catch (RuntimeException e) {
+          throw new IOException("malformed key attestation extension", e);
+        }
       }
     }
 

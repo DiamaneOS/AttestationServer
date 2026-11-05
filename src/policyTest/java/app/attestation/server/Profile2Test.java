@@ -177,6 +177,7 @@ public final class Profile2Test {
         releaseListStore();
         challengeLimit();
         enrollLink();
+        malformedReports(alice, list1);
         System.out.println("Profile 2 server tests: " + passed + " checks passed (software fixtures, no hardware claim).");
     }
 
@@ -453,6 +454,18 @@ public final class Profile2Test {
         } finally {
             insert.dispose();
         }
+    }
+
+    // Reports a fuzzer found: each is refused as invalid, and once a paired phone's report is
+    // authenticated its failure is recorded for the alert.
+    private static void malformedReports(final long userId, final ReleaseList list) throws Exception {
+        final Profile2Fixture malformed = new Profile2Fixture();
+        malformed.challenge = challenge(userId, 1000);
+        // SEQUENCE { INTEGER 3 }: a key description cut short
+        malformed.leafKeyDescription = new byte[]{0x30, 0x03, 0x02, 0x01, 0x03};
+        rejected("malformed key attestation extension",
+                () -> verify(malformed.message(), userId, false, list));
+        require(!exists(malformed), "malformed report stores nothing");
     }
 
     private static Profile2Fixture approved(final long userId, final ReleaseList list) throws Exception {
