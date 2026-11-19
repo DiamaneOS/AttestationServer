@@ -629,8 +629,9 @@ class AttestationProtocol {
             throw new GeneralSecurityException("invalid verified boot key fingerprint: " + verifiedBootKey);
         }
 
-        // Keep the upstream rule for every other device. FP6 is exempt only
-        // through its authenticated, allowlisted verified-boot key above.
+        // Keep the upstream rule for every device whose record requires StrongBox.
+        // One whose record does not is exempt only through its authenticated,
+        // allowlisted verified-boot key above.
         if (!hasPersistentKey && device.requiresStrongBox() &&
                 attestationSecurityLevelEnum != ParsedAttestationRecord.SecurityLevel.STRONG_BOX) {
             throw new GeneralSecurityException("new pairing without StrongBox security level");
